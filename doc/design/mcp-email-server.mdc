@@ -3,7 +3,50 @@ description:
 globs: 
 alwaysApply: false
 ---
-# メールMCPサーバー設計書
+# MCP Email Server 設計文書
+
+## 概要
+複数Gmail + IMAPサーバー対応のMCPサーバー
+
+## 技術スタック
+- TypeScript/Node.js
+- MCP SDK
+- Gmail API v1
+- IMAP4rev1
+
+## アーキテクチャ
+```
+MCPEmailServer
+├── Gmail認証・操作
+├── IMAP認証・操作
+├── 暗号化機能
+└── MCPツール（6個）
+```
+
+## MCPツール一覧
+1. list_emails - メール一覧取得
+2. search_emails - メール検索
+3. get_email_detail - メール詳細取得
+4. get_unread_count - 未読数取得
+5. list_accounts - アカウント一覧
+6. test_connection - 接続テスト
+
+## 環境変数設計
+```bash
+EMAIL_GMAIL_MAIN_CLIENT_ID=xxx
+EMAIL_GMAIL_MAIN_CLIENT_SECRET=xxx
+EMAIL_GMAIL_MAIN_REFRESH_TOKEN=xxx
+EMAIL_IMAP_PERSONAL_HOST=mail.example.com
+EMAIL_IMAP_PERSONAL_USER=user@example.com
+EMAIL_IMAP_PERSONAL_PASS_ENCRYPTED=encrypted_password
+EMAIL_ENCRYPTION_KEY=32_character_key
+```
+
+## 実装タスク
+1. Task 1: 基盤実装（MCP基本構造、暗号化）
+2. Task 2: Gmail実装（OAuth2、API操作）
+3. Task 3: IMAP実装（認証、メール操作）
+4. Task 4: 統合・テスト
 
 ## 1. 概要
 
