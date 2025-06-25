@@ -1,0 +1,559 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# メールMCPサーバー設計書
+
+## 1. 概要
+
+### 1.1 目的
+複数のGmailアカウントとIMAPサーバー（xserver独自ドメイン）に対応した統合メールMCPサーバーを実装し、Cursor/Claude経由でメール操作を可能にする。
+
+### 1.2 主要機能
+- **複数Gmail認証**: 同一個人の複数Gmailアカウント（最大10個）
+- **IMAP認証**: xserver独自ドメインメール対応
+- **メール一覧取得**: アカウント指定可能（応答時間1分以内）
+- **メール検索**: 全アカウント横断検索対応
+- **メール詳細取得**: 特定メールの完全な内容取得
+- **未読メール確認**: アカウント別未読数確認
+
+### 1.3 技術スタック
+- **言語**: TypeScript/Node.js
+- **プロトコル**: MCP (Model Context Protocol)
+- **認証**: Gmail OAuth2 + IMAP認証
+- **暗号化**: AES暗号化（IMAPパスワード）
+- **設定管理**: .env環境変数
+
+## 2. システム要件
+
+### 2.1 機能要件
+| 要件ID | 機能名 | 優先度 | 詳細 |
+|--------|--------|--------|------|
+| REQ-001 | Gmail OAuth2認証 | Must | 複数アカウント対応（最大10個） |
+| REQ-002 | IMAP認証 | Must | xserver対応、パスワード暗号化 |
+| REQ-003 | メール一覧取得 | Must | アカウント指定、フォルダ指定 |
+| REQ-004 | メール検索 | Must | 全アカウント横断検索 |
+| REQ-005 | メール詳細取得 | Must | 添付ファイル情報含む |
+| REQ-006 | 未読メール確認 | Must | アカウント別未読数 |
+| REQ-007 | 接続テスト | Should | アカウント別接続状態確認 |
+| REQ-008 | エラーハンドリング | Should | 接続失敗時ユーザー通知 |
+
+### 2.2 非機能要件
+| 項目 | 要件 | 測定方法 |
+|------|------|----------|
+| 性能 | 応答時間1分以内 | レスポンス時間測定 |
+| 拡張性 | 最大10アカウント対応 | 同時接続数テスト |
+| セキュリティ | IMAPパスワード暗号化 | 暗号化検証 |
+| 可用性 | 部分障害時継続動作 | 障害シミュレーション |
+
+### 2.3 制約条件
+- 開発期間: なるべく早く（4日程度）
+- 既存Google Calendar MCPとの認証方式統一
+- MCPプロトコル標準準拠
+- シンプルなアーキテクチャ（クライアント分離なし）
+
+## 3. システムアーキテクチャ
+
+### 3.1 全体構成
+```mermaid
+graph TB
+    A[Cursor/Claude] -->|JSONRPC| B[MCP Email Server]
+    B --> C[MCPProtocolHandler]
+    C --> D[Gmail API処理]
+    C --> E[IMAP処理]
+    C --> F[暗号化処理]
+    
+    D --> G[Gmail Account MAIN]
+    D --> H[Gmail Account WORK]
+    E --> I[IMAP Account PERSONAL]
+    
+    C --> J[.env設定ファイル]
+    
+    style B fill:#e1f5fe
+    style C fill:#f3e5f5
+    style J fill:#fff3e0
+```
+
+### 3.2 コンポーネント設計
+```typescript
+// メインサーバークラス
+class MCPEmailServer {
+  private gmailAccounts: Map<string, GmailConfig>
+  private imapAccounts: Map<string, IMAPConfig>
+  private encryptionKey: string
+  
+  // MCP標準メソッド
+  async handleRequest(request: MCPRequest): Promise<MCPResponse>
+  
+  // Gmail操作（直接実装）
+  private async handleGmailOperation(account: string, operation: string, params: any)
+  
+  // IMAP操作（直接実装）
+  private async handleIMAPOperation(account: string, operation: string, params: any)
+  
+  // 暗号化・復号化
+  private encrypt(text: string): string
+  private decrypt(encryptedText: string): string
+}
+```
+
+### 3.3 データ型定義
+```typescript
+interface GmailConfig {
+  clientId: string
+  clientSecret: string
+  refreshToken: string
+  displayName: string
+}
+
+interface IMAPConfig {
+  host: string
+  user: string
+  passEncrypted: string
+  displayName: string
+}
+
+interface EmailMessage {
+  id: string
+  accountName: string
+  accountType: 'gmail' | 'imap'
+  subject: string
+  from: string
+  to: string[]
+  date: string
+  snippet: string
+  isUnread: boolean
+  hasAttachments?: boolean
+}
+
+interface EmailDetail extends EmailMessage {
+  body: string
+  bodyHtml?: string
+  attachments?: AttachmentInfo[]
+  headers: Record<string, string>
+}
+
+interface AttachmentInfo {
+  filename: string
+  mimeType: string
+  size: number
+  attachmentId: string
+}
+```
+
+## 4. 認証・設定管理
+
+### 4.1 環境変数設計
+```bash
+# Gmail Accounts (アカウント名明示、最大10個)
+EMAIL_GMAIL_MAIN_CLIENT_ID=522186649767-xxx.apps.googleusercontent.com
+EMAIL_GMAIL_MAIN_CLIENT_SECRET=GOCSPX-xxx
+EMAIL_GMAIL_MAIN_REFRESH_TOKEN=1//xxx
+EMAIL_GMAIL_MAIN_DISPLAY_NAME="メインGmail"
+
+EMAIL_GMAIL_WORK_CLIENT_ID=522186649767-yyy.apps.googleusercontent.com
+EMAIL_GMAIL_WORK_CLIENT_SECRET=GOCSPX-yyy
+EMAIL_GMAIL_WORK_REFRESH_TOKEN=1//yyy
+EMAIL_GMAIL_WORK_DISPLAY_NAME="仕事用Gmail"
+
+# IMAP Account (xserver独自ドメイン)
+EMAIL_IMAP_PERSONAL_HOST=mail.example.com
+EMAIL_IMAP_PERSONAL_PORT=993
+EMAIL_IMAP_PERSONAL_USER=user@example.com
+EMAIL_IMAP_PERSONAL_PASS_ENCRYPTED=encrypted_password_here
+EMAIL_IMAP_PERSONAL_DISPLAY_NAME="個人ドメインメール"
+
+# 暗号化設定
+EMAIL_ENCRYPTION_KEY=your_32_character_encryption_key_here
+EMAIL_ENCRYPTION_ALGORITHM=aes-256-cbc
+```
+
+### 4.2 暗号化仕様
+```typescript
+// AES-256-CBC暗号化
+const algorithm = 'aes-256-cbc'
+const key = crypto.scryptSync(process.env.EMAIL_ENCRYPTION_KEY!, 'salt', 32)
+
+function encrypt(text: string): string {
+  const iv = crypto.randomBytes(16)
+  const cipher = crypto.createCipher(algorithm, key)
+  let encrypted = cipher.update(text, 'utf8', 'hex')
+  encrypted += cipher.final('hex')
+  return iv.toString('hex') + ':' + encrypted
+}
+
+function decrypt(encryptedText: string): string {
+  const [ivHex, encrypted] = encryptedText.split(':')
+  const iv = Buffer.from(ivHex, 'hex')
+  const decipher = crypto.createDecipher(algorithm, key)
+  let decrypted = decipher.update(encrypted, 'hex', 'utf8')
+  decrypted += decipher.final('utf8')
+  return decrypted
+}
+```
+
+## 5. MCPツール仕様
+
+### 5.1 list_emails
+```typescript
+{
+  name: 'list_emails',
+  description: 'Get email list from specified account',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      account_name: { 
+        type: 'string', 
+        description: 'Account name (MAIN, WORK, PERSONAL, ALL)',
+        enum: ['MAIN', 'WORK', 'PERSONAL', 'ALL'],
+        default: 'ALL'
+      },
+      limit: { 
+        type: 'number', 
+        description: 'Maximum number of emails (1-100)',
+        default: 20,
+        minimum: 1,
+        maximum: 100
+      },
+      folder: {
+        type: 'string',
+        description: 'Folder/Label name',
+        default: 'INBOX'
+      },
+      unread_only: {
+        type: 'boolean',
+        description: 'Show only unread emails',
+        default: false
+      }
+    }
+  }
+}
+```
+
+### 5.2 search_emails
+```typescript
+{
+  name: 'search_emails',
+  description: 'Search emails across accounts',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      query: { 
+        type: 'string', 
+        description: 'Search query (subject, from, content)',
+        required: true
+      },
+      account_name: { 
+        type: 'string', 
+        description: 'Account to search',
+        enum: ['MAIN', 'WORK', 'PERSONAL', 'ALL'],
+        default: 'ALL'
+      },
+      limit: { 
+        type: 'number', 
+        description: 'Maximum results (1-50)',
+        default: 10,
+        minimum: 1,
+        maximum: 50
+      },
+      date_range: {
+        type: 'string',
+        description: 'Date range (e.g., "last_week", "last_month")',
+        enum: ['today', 'last_week', 'last_month', 'last_year']
+      }
+    },
+    required: ['query']
+  }
+}
+```
+
+### 5.3 get_email_detail
+```typescript
+{
+  name: 'get_email_detail',
+  description: 'Get detailed email content',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      email_id: { 
+        type: 'string', 
+        description: 'Email ID',
+        required: true
+      },
+      account_name: { 
+        type: 'string', 
+        description: 'Account name',
+        required: true
+      },
+      include_attachments: {
+        type: 'boolean',
+        description: 'Include attachment information',
+        default: false
+      },
+      format: {
+        type: 'string',
+        description: 'Response format',
+        enum: ['text', 'html', 'both'],
+        default: 'text'
+      }
+    },
+    required: ['email_id', 'account_name']
+  }
+}
+```
+
+### 5.4 get_unread_count
+```typescript
+{
+  name: 'get_unread_count',
+  description: 'Get unread email count',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      account_name: { 
+        type: 'string', 
+        description: 'Account name',
+        enum: ['MAIN', 'WORK', 'PERSONAL', 'ALL'],
+        default: 'ALL'
+      },
+      folder: {
+        type: 'string',
+        description: 'Folder/Label name',
+        default: 'INBOX'
+      }
+    }
+  }
+}
+```
+
+### 5.5 list_accounts
+```typescript
+{
+  name: 'list_accounts',
+  description: 'List configured email accounts',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      include_status: {
+        type: 'boolean',
+        description: 'Include connection status',
+        default: true
+      }
+    }
+  }
+}
+```
+
+### 5.6 test_connection
+```typescript
+{
+  name: 'test_connection',
+  description: 'Test account connection',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      account_name: { 
+        type: 'string', 
+        description: 'Account name to test',
+        required: true
+      }
+    },
+    required: ['account_name']
+  }
+}
+```
+
+## 6. エラーハンドリング
+
+### 6.1 エラー分類
+| エラーコード | 分類 | 対応方法 |
+|-------------|------|----------|
+| -32600 | Invalid Request | リクエスト形式確認 |
+| -32601 | Method Not Found | メソッド名確認 |
+| -32602 | Invalid Params | パラメータ確認 |
+| -32603 | Internal Error | サーバーログ確認 |
+| -32001 | Auth Error | 認証情報確認 |
+| -32002 | Connection Error | ネットワーク確認 |
+| -32003 | Account Not Found | アカウント設定確認 |
+
+### 6.2 エラーレスポンス例
+```typescript
+// 認証エラー
+{
+  jsonrpc: '2.0',
+  id: 1,
+  error: {
+    code: -32001,
+    message: 'Authentication failed for account MAIN',
+    data: {
+      accountName: 'MAIN',
+      accountType: 'gmail',
+      errorDetail: 'Invalid refresh token',
+      suggestion: 'Please update OAuth tokens in .env file'
+    }
+  }
+}
+
+// 接続エラー
+{
+  jsonrpc: '2.0',
+  id: 2,
+  error: {
+    code: -32002,
+    message: 'Connection timeout for account PERSONAL',
+    data: {
+      accountName: 'PERSONAL',
+      accountType: 'imap',
+      host: 'mail.example.com',
+      suggestion: 'Check network connection and IMAP server status'
+    }
+  }
+}
+```
+
+## 7. 実装タスク分割
+
+### 7.1 Task 1: 基盤実装
+**目的**: MCPサーバー基本構造と暗号化機能の実装
+
+**成果物**:
+- `src/index.ts` - メインサーバーファイル
+- `src/types.ts` - 型定義
+- `src/crypto.ts` - 暗号化・復号化機能
+- `package.json` - 依存関係設定
+- `.env.example` - 設定例ファイル
+
+**依存関係**: なし
+
+### 7.2 Task 2: Gmail実装
+**目的**: Gmail OAuth2認証とAPI操作の実装
+
+**成果物**:
+- `src/gmail.ts` - Gmail操作機能
+- Gmail OAuth2認証処理
+- Gmail API操作（一覧、検索、詳細）
+
+**依存関係**: Task 1完了後
+
+### 7.3 Task 3: IMAP実装
+**目的**: IMAP認証とメール操作の実装
+
+**成果物**:
+- `src/imap.ts` - IMAP操作機能
+- IMAP認証処理（暗号化パスワード対応）
+- IMAP操作（一覧、検索、詳細）
+
+**依存関係**: Task 1完了後
+
+### 7.4 Task 4: 統合・テスト
+**目的**: 全機能統合とテスト実装
+
+**成果物**:
+- 全アカウント横断機能
+- エラーハンドリング強化
+- MCP設定ファイル
+- テストスクリプト
+- README.md
+
+**依存関係**: Task 2, Task 3完了後
+
+## 8. 技術仕様
+
+### 8.1 依存ライブラリ
+```json
+{
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "googleapis": "^144.0.0",
+    "node-imap": "^0.9.6",
+    "dotenv": "^16.5.0",
+    "crypto": "built-in"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "@types/node": "^20.0.0",
+    "@types/node-imap": "^0.9.0"
+  }
+}
+```
+
+### 8.2 MCP設定
+```json
+{
+  "mcpServers": {
+    "email": {
+      "command": "node",
+      "args": ["/Users/taroken/src/git/mcp-email-server/dist/index.js"],
+      "env": {
+        "NODE_ENV": "production"
+      }
+    }
+  }
+}
+```
+
+## 9. テスト戦略
+
+### 9.1 テストケース
+| テストID | テスト内容 | 期待結果 |
+|----------|------------|----------|
+| TEST-001 | Gmail認証テスト | 正常認証完了 |
+| TEST-002 | IMAP認証テスト | 正常認証完了 |
+| TEST-003 | メール一覧取得 | 20件以内で取得 |
+| TEST-004 | メール検索 | 検索条件に合致 |
+| TEST-005 | メール詳細取得 | 完全な内容取得 |
+| TEST-006 | 未読数確認 | 正確な未読数 |
+| TEST-007 | 接続エラー処理 | 適切なエラー通知 |
+| TEST-008 | 暗号化・復号化 | データ整合性確保 |
+
+### 9.2 パフォーマンステスト
+- **応答時間**: 各操作1分以内
+- **同時接続**: 最大10アカウント
+- **メモリ使用量**: 500MB以下
+
+## 10. 運用・保守
+
+### 10.1 ログ設計
+```typescript
+// ログレベル
+enum LogLevel {
+  ERROR = 0,
+  WARN = 1,
+  INFO = 2,
+  DEBUG = 3
+}
+
+// ログ出力例
+logger.info('Gmail authentication successful', {
+  accountName: 'MAIN',
+  timestamp: new Date().toISOString()
+})
+
+logger.error('IMAP connection failed', {
+  accountName: 'PERSONAL',
+  error: error.message,
+  timestamp: new Date().toISOString()
+})
+```
+
+### 10.2 監視項目
+- アカウント別接続状態
+- API呼び出し回数
+- エラー発生率
+- 応答時間
+
+### 10.3 トラブルシューティング
+| 症状 | 原因 | 対処法 |
+|------|------|--------|
+| Gmail認証失敗 | トークン期限切れ | OAuth2トークン更新 |
+| IMAP接続失敗 | パスワード不正 | 暗号化パスワード確認 |
+| 応答時間超過 | ネットワーク遅延 | タイムアウト設定調整 |
+| メール取得失敗 | API制限 | リクエスト頻度調整 |
+
+---
+
+**設計書バージョン**: 1.0  
+**作成日**: 2025年6月25日  
+**作成者**: AI設計者  
+**承認者**: ユーザー確認待ち
