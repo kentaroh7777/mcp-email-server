@@ -4,6 +4,39 @@ export class IMAPHandler {
     constructor(encryptionKey = process.env.EMAIL_ENCRYPTION_KEY || 'default-key') {
         this.connections = new Map();
         this.encryptionKey = encryptionKey;
+        this.loadIMAPConfigs();
+    }
+    loadIMAPConfigs() {
+        // Load regular IMAP accounts
+        const imapHostKeys = Object.keys(process.env).filter(key => key.startsWith('IMAP_HOST_'));
+        for (const hostKey of imapHostKeys) {
+            const accountName = hostKey.replace('IMAP_HOST_', '');
+            const host = process.env[hostKey];
+            const port = parseInt(process.env[`IMAP_PORT_${accountName}`] || '993');
+            const secure = process.env[`IMAP_SECURE_${accountName}`] === 'true';
+            const user = process.env[`IMAP_USER_${accountName}`];
+            const password = process.env[`IMAP_PASSWORD_${accountName}`];
+            if (host && user && password) {
+                this.addAccount(accountName, {
+                    host,
+                    port,
+                    secure,
+                    user,
+                    password
+                });
+            }
+        }
+        // Load XServer accounts
+        const xserverDomainKeys = Object.keys(process.env).filter(key => key.startsWith('XSERVER_DOMAIN_'));
+        for (const domainKey of xserverDomainKeys) {
+            const accountName = domainKey.replace('XSERVER_DOMAIN_', '');
+            const domain = process.env[domainKey];
+            const username = process.env[`XSERVER_USERNAME_${accountName}`];
+            const password = process.env[`XSERVER_PASSWORD_${accountName}`];
+            if (domain && username && password) {
+                this.addXServerAccount(accountName, domain, username, password);
+            }
+        }
     }
     addAccount(accountName, config) {
         this.connections.set(accountName, { config });

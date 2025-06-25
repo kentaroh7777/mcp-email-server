@@ -21,4 +21,8 @@ export declare class MCPEmailServer {
     private handleGetImapUnreadCount;
     addImapAccount(accountName: string, host: string, port: number, secure: boolean, user: string, encryptedPassword: string): void;
     addXServerAccount(accountName: string, domain: string, username: string, encryptedPassword: string): void;
+    private handleListAccounts;
+    private handleTestConnection;
+    private handleSearchAllEmails;
+    private handleGetAccountStats;
 }

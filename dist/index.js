@@ -62,7 +62,73 @@ export class MCPEmailServer {
         };
     }
     handleToolsList(request) {
+        const unifiedTools = [
+            {
+                name: 'list_accounts',
+                description: 'List all configured email accounts with their status',
+                inputSchema: {
+                    type: 'object',
+                    properties: {},
+                    required: []
+                }
+            },
+            {
+                name: 'test_connection',
+                description: 'Test connection to a specific email account',
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        account_name: {
+                            type: 'string',
+                            description: 'Name of the account to test'
+                        }
+                    },
+                    required: ['account_name']
+                }
+            },
+            {
+                name: 'search_all_emails',
+                description: 'Search emails across all Gmail and IMAP accounts',
+                inputSchema: {
+                    type: 'object',
+                    properties: {
+                        query: {
+                            type: 'string',
+                            description: 'Search query'
+                        },
+                        accounts: {
+                            type: 'string',
+                            enum: ['ALL', 'GMAIL_ONLY', 'IMAP_ONLY'],
+                            description: 'Which accounts to search',
+                            default: 'ALL'
+                        },
+                        limit: {
+                            type: 'number',
+                            description: 'Maximum number of results',
+                            default: 20
+                        },
+                        sortBy: {
+                            type: 'string',
+                            enum: ['date', 'relevance'],
+                            description: 'Sort results by date or relevance',
+                            default: 'date'
+                        }
+                    },
+                    required: ['query']
+                }
+            },
+            {
+                name: 'get_account_stats',
+                description: 'Get statistics for all configured accounts',
+                inputSchema: {
+                    type: 'object',
+                    properties: {},
+                    required: []
+                }
+            }
+        ];
         const tools = [
+            ...unifiedTools,
             ...gmailTools,
             ...imapTools
         ];
@@ -76,6 +142,16 @@ export class MCPEmailServer {
         try {
             const { name, arguments: args } = request.params || {};
             switch (name) {
+                // Unified tools
+                case 'list_accounts':
+                    return await this.handleListAccounts(args, request.id);
+                case 'test_connection':
+                    return await this.handleTestConnection(args, request.id);
+                case 'search_all_emails':
+                    return await this.handleSearchAllEmails(args, request.id);
+                case 'get_account_stats':
+                    return await this.handleGetAccountStats(args, request.id);
+                // Gmail tools
                 case 'list_emails':
                     return await this.handleListEmails(args, request.id);
                 case 'search_emails':
@@ -84,6 +160,7 @@ export class MCPEmailServer {
                     return await this.handleGetEmailDetail(args, request.id);
                 case 'get_unread_count':
                     return await this.handleGetUnreadCount(args, request.id);
+                // IMAP tools
                 case 'list_imap_emails':
                     return await this.handleListImapEmails(args, request.id);
                 case 'search_imap_emails':
@@ -242,6 +319,241 @@ export class MCPEmailServer {
     }
     addXServerAccount(accountName, domain, username, encryptedPassword) {
         this.imapHandler.addXServerAccount(accountName, domain, username, encryptedPassword);
+    }
+    // Unified methods implementation
+    async handleListAccounts(_args, requestId) {
+        try {
+            const accounts = [];
+            // Gmail accounts
+            const gmailAccounts = this.gmailHandler.getAvailableAccounts();
+            for (const account of gmailAccounts) {
+                try {
+                    await this.gmailHandler.getUnreadCount(account);
+                    accounts.push({
+                        name: account,
+                        type: 'gmail',
+                        status: 'connected',
+                        lastChecked: new Date().toISOString()
+                    });
+                }
+                catch (error) {
+                    accounts.push({
+                        name: account,
+                        type: 'gmail',
+                        status: 'error',
+                        lastChecked: new Date().toISOString(),
+                        errorMessage: error instanceof Error ? error.message : 'Unknown error'
+                    });
+                }
+            }
+            // IMAP accounts
+            const imapAccounts = this.imapHandler.getAvailableAccounts();
+            for (const account of imapAccounts) {
+                try {
+                    await this.imapHandler.getUnreadCount(account);
+                    accounts.push({
+                        name: account,
+                        type: 'imap',
+                        status: 'connected',
+                        lastChecked: new Date().toISOString()
+                    });
+                }
+                catch (error) {
+                    accounts.push({
+                        name: account,
+                        type: 'imap',
+                        status: 'error',
+                        lastChecked: new Date().toISOString(),
+                        errorMessage: error instanceof Error ? error.message : 'Unknown error'
+                    });
+                }
+            }
+            return this.createResponse(requestId, { accounts });
+        }
+        catch (error) {
+            throw error;
+        }
+    }
+    async handleTestConnection(args, requestId) {
+        try {
+            const { account_name } = args;
+            // Check if it's a Gmail account
+            const gmailAccounts = this.gmailHandler.getAvailableAccounts();
+            if (gmailAccounts.includes(account_name)) {
+                try {
+                    const count = await this.gmailHandler.getUnreadCount(account_name);
+                    return this.createResponse(requestId, {
+                        account: account_name,
+                        type: 'gmail',
+                        status: 'connected',
+                        testResult: `Successfully connected. Unread count: ${count}`,
+                        timestamp: new Date().toISOString()
+                    });
+                }
+                catch (error) {
+                    return this.createResponse(requestId, {
+                        account: account_name,
+                        type: 'gmail',
+                        status: 'error',
+                        testResult: `Connection failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                        timestamp: new Date().toISOString()
+                    });
+                }
+            }
+            // Check if it's an IMAP account
+            const imapAccounts = this.imapHandler.getAvailableAccounts();
+            if (imapAccounts.includes(account_name)) {
+                try {
+                    const count = await this.imapHandler.getUnreadCount(account_name);
+                    return this.createResponse(requestId, {
+                        account: account_name,
+                        type: 'imap',
+                        status: 'connected',
+                        testResult: `Successfully connected. Unread count: ${count}`,
+                        timestamp: new Date().toISOString()
+                    });
+                }
+                catch (error) {
+                    return this.createResponse(requestId, {
+                        account: account_name,
+                        type: 'imap',
+                        status: 'error',
+                        testResult: `Connection failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                        timestamp: new Date().toISOString()
+                    });
+                }
+            }
+            return this.createResponse(requestId, {
+                account: account_name,
+                status: 'not_found',
+                testResult: 'Account not found in configuration',
+                timestamp: new Date().toISOString()
+            });
+        }
+        catch (error) {
+            throw error;
+        }
+    }
+    async handleSearchAllEmails(args, requestId) {
+        const startTime = Date.now();
+        try {
+            const results = [];
+            const errors = [];
+            // Gmail search
+            if (args.accounts === 'ALL' || args.accounts === 'GMAIL_ONLY') {
+                const gmailAccounts = this.gmailHandler.getAvailableAccounts();
+                const gmailPromises = gmailAccounts.map(async (account) => {
+                    try {
+                        const emails = await this.gmailHandler.searchEmails(account, args.query, Math.floor((args.limit || 20) / (gmailAccounts.length + this.imapHandler.getAvailableAccounts().length)));
+                        return emails;
+                    }
+                    catch (error) {
+                        errors.push(`Gmail ${account}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+                        return [];
+                    }
+                });
+                const gmailResults = await Promise.all(gmailPromises);
+                results.push(...gmailResults.flat());
+            }
+            // IMAP search
+            if (args.accounts === 'ALL' || args.accounts === 'IMAP_ONLY') {
+                const imapAccounts = this.imapHandler.getAvailableAccounts();
+                const imapPromises = imapAccounts.map(async (account) => {
+                    try {
+                        const emails = await this.imapHandler.searchEmails(account, args.query, Math.floor((args.limit || 20) / (this.gmailHandler.getAvailableAccounts().length + imapAccounts.length)));
+                        return emails;
+                    }
+                    catch (error) {
+                        errors.push(`IMAP ${account}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+                        return [];
+                    }
+                });
+                const imapResults = await Promise.all(imapPromises);
+                results.push(...imapResults.flat());
+            }
+            // Sort results
+            const sortedResults = results.sort((a, b) => {
+                if (args.sortBy === 'relevance') {
+                    // Simple relevance score (title match priority)
+                    const aScore = a.subject.toLowerCase().includes(args.query.toLowerCase()) ? 1 : 0;
+                    const bScore = b.subject.toLowerCase().includes(args.query.toLowerCase()) ? 1 : 0;
+                    if (aScore !== bScore)
+                        return bScore - aScore;
+                }
+                return new Date(b.date).getTime() - new Date(a.date).getTime();
+            }).slice(0, args.limit || 20);
+            return this.createResponse(requestId, {
+                emails: sortedResults,
+                totalFound: results.length,
+                searchQuery: args.query,
+                responseTime: Date.now() - startTime,
+                errors: errors.length > 0 ? errors : undefined
+            });
+        }
+        catch (error) {
+            throw error;
+        }
+    }
+    async handleGetAccountStats(_args, requestId) {
+        try {
+            const stats = {
+                gmail: {},
+                imap: {},
+                summary: {
+                    totalAccounts: 0,
+                    connectedAccounts: 0,
+                    totalUnreadEmails: 0
+                }
+            };
+            // Gmail stats
+            const gmailAccounts = this.gmailHandler.getAvailableAccounts();
+            for (const account of gmailAccounts) {
+                try {
+                    const unreadCount = await this.gmailHandler.getUnreadCount(account);
+                    stats.gmail[account] = {
+                        status: 'connected',
+                        unreadCount,
+                        lastChecked: new Date().toISOString()
+                    };
+                    stats.summary.connectedAccounts++;
+                    stats.summary.totalUnreadEmails += unreadCount;
+                }
+                catch (error) {
+                    stats.gmail[account] = {
+                        status: 'error',
+                        error: error instanceof Error ? error.message : 'Unknown error',
+                        lastChecked: new Date().toISOString()
+                    };
+                }
+                stats.summary.totalAccounts++;
+            }
+            // IMAP stats
+            const imapAccounts = this.imapHandler.getAvailableAccounts();
+            for (const account of imapAccounts) {
+                try {
+                    const unreadCount = await this.imapHandler.getUnreadCount(account);
+                    stats.imap[account] = {
+                        status: 'connected',
+                        unreadCount,
+                        lastChecked: new Date().toISOString()
+                    };
+                    stats.summary.connectedAccounts++;
+                    stats.summary.totalUnreadEmails += unreadCount;
+                }
+                catch (error) {
+                    stats.imap[account] = {
+                        status: 'error',
+                        error: error instanceof Error ? error.message : 'Unknown error',
+                        lastChecked: new Date().toISOString()
+                    };
+                }
+                stats.summary.totalAccounts++;
+            }
+            return this.createResponse(requestId, stats);
+        }
+        catch (error) {
+            throw error;
+        }
     }
 }
 const server = new MCPEmailServer();

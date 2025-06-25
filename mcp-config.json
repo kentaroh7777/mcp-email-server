@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "email": {
+      "command": "node",
+      "args": ["/Users/taroken/src/git/mcp-email-server/dist/index.js"],
+      "env": {
+        "NODE_ENV": "production"
+      }
+    }
+  }
+}

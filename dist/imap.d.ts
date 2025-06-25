@@ -3,6 +3,7 @@ export declare class IMAPHandler {
     private encryptionKey;
     private connections;
     constructor(encryptionKey?: string);
+    private loadIMAPConfigs;
     addAccount(accountName: string, config: IMAPConfig): void;
     private getConnection;
     private openBox;

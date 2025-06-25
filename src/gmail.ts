@@ -9,19 +9,41 @@ export class GmailHandler {
   }
 
   private loadGmailConfigs() {
-    const accountNames = ['MAIN', 'WORK'];
+    // First try the new format (GMAIL_ACCESS_TOKEN_accountname)
+    const gmailTokenKeys = Object.keys(process.env).filter(key => key.startsWith('GMAIL_ACCESS_TOKEN_'));
+    const clientId = process.env.GMAIL_CLIENT_ID;
+    const clientSecret = process.env.GMAIL_CLIENT_SECRET;
     
-    for (const accountName of accountNames) {
-      const clientId = process.env[`EMAIL_GMAIL_${accountName}_CLIENT_ID`];
-      const clientSecret = process.env[`EMAIL_GMAIL_${accountName}_CLIENT_SECRET`];
-      const refreshToken = process.env[`EMAIL_GMAIL_${accountName}_REFRESH_TOKEN`];
-      const displayName = process.env[`EMAIL_GMAIL_${accountName}_DISPLAY_NAME`];
-
+    for (const tokenKey of gmailTokenKeys) {
+      const accountName = tokenKey.replace('GMAIL_ACCESS_TOKEN_', '');
+      const refreshTokenKey = `GMAIL_REFRESH_TOKEN_${accountName}`;
+      const refreshToken = process.env[refreshTokenKey];
+      
       if (clientId && clientSecret && refreshToken) {
         this.configs.set(accountName, {
           clientId,
           clientSecret,
           refreshToken,
+          displayName: accountName
+        });
+      }
+    }
+    
+    // Fallback to old format for backward compatibility
+    const oldAccountNames = ['MAIN', 'WORK'];
+    for (const accountName of oldAccountNames) {
+      if (this.configs.has(accountName)) continue; // Skip if already loaded
+      
+      const oldClientId = process.env[`EMAIL_GMAIL_${accountName}_CLIENT_ID`];
+      const oldClientSecret = process.env[`EMAIL_GMAIL_${accountName}_CLIENT_SECRET`];
+      const oldRefreshToken = process.env[`EMAIL_GMAIL_${accountName}_REFRESH_TOKEN`];
+      const displayName = process.env[`EMAIL_GMAIL_${accountName}_DISPLAY_NAME`];
+
+      if (oldClientId && oldClientSecret && oldRefreshToken) {
+        this.configs.set(accountName, {
+          clientId: oldClientId,
+          clientSecret: oldClientSecret,
+          refreshToken: oldRefreshToken,
           displayName: displayName || accountName
         });
       }
