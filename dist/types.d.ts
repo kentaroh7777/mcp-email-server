@@ -19,7 +19,7 @@ export interface GmailConfig {
     clientId: string;
     clientSecret: string;
     refreshToken: string;
-    accessToken?: string;
+    displayName: string;
 }
 export interface IMAPConfig {
     host: string;
@@ -58,4 +58,29 @@ export interface Tool {
         properties: Record<string, any>;
         required?: string[];
     };
+}
+export interface EmailMessage {
+    id: string;
+    accountName: string;
+    accountType: 'gmail' | 'imap';
+    subject: string;
+    from: string;
+    to: string[];
+    date: string;
+    snippet: string;
+    isUnread: boolean;
+    hasAttachments: boolean;
+}
+export interface EmailDetail extends EmailMessage {
+    body: string;
+    attachments: Array<{
+        filename: string;
+        contentType: string;
+        size: number;
+    }>;
+}
+export interface ListEmailsParams {
+    limit?: number;
+    folder?: string;
+    unread_only?: boolean;
 }

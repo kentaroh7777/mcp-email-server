@@ -1,14 +1,17 @@
 import * as readline from 'readline';
 import * as dotenv from 'dotenv';
-import { MCPRequest, MCPResponse, InitializeResult } from './types';
+import { MCPRequest, MCPResponse, InitializeResult, Tool, EmailMessage } from './types';
+import { GmailHandler, gmailTools } from './gmail';
 
 dotenv.config();
 
 export class MCPEmailServer {
+  private gmailHandler: GmailHandler;
   // Task 2, 3で使用予定
   // private encryptionKey: string;
 
   constructor() {
+    this.gmailHandler = new GmailHandler();
     // this.encryptionKey = process.env.EMAIL_ENCRYPTION_KEY || 'default-key';
   }
 
@@ -22,7 +25,7 @@ export class MCPEmailServer {
           return this.handleToolsList(request);
         
         case 'tools/call':
-          return this.handleToolsCall(request);
+          return await this.handleToolsCall(request);
         
         case 'resources/list':
           return this.handleResourcesList(request);
@@ -71,22 +74,54 @@ export class MCPEmailServer {
   }
 
   private handleToolsList(request: MCPRequest): MCPResponse {
+    const tools: Tool[] = [
+      ...gmailTools
+    ];
+
     return {
       jsonrpc: '2.0',
       id: request.id,
-      result: { tools: [] }
+      result: { tools }
     };
   }
 
-  private handleToolsCall(request: MCPRequest): MCPResponse {
-    return {
-      jsonrpc: '2.0',
-      id: request.id,
-      error: {
-        code: -32601,
-        message: 'Tool not found'
+  private async handleToolsCall(request: MCPRequest): Promise<MCPResponse> {
+    try {
+      const { name, arguments: args } = request.params || {};
+      
+      switch (name) {
+        case 'list_emails':
+          return await this.handleListEmails(args, request.id);
+        
+        case 'search_emails':
+          return await this.handleSearchEmails(args, request.id);
+        
+        case 'get_email_detail':
+          return await this.handleGetEmailDetail(args, request.id);
+        
+        case 'get_unread_count':
+          return await this.handleGetUnreadCount(args, request.id);
+        
+        default:
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            error: {
+              code: -32601,
+              message: `Unknown tool: ${name}`
+            }
+          };
       }
-    };
+    } catch (error) {
+      return {
+        jsonrpc: '2.0',
+        id: request.id,
+        error: {
+          code: -32603,
+          message: `Tool execution failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+        }
+      };
+    }
   }
 
   private handleResourcesList(request: MCPRequest): MCPResponse {
@@ -94,6 +129,92 @@ export class MCPEmailServer {
       jsonrpc: '2.0',
       id: request.id,
       result: { resources: [] }
+    };
+  }
+
+  private async handleListEmails(args: any, requestId: any): Promise<MCPResponse> {
+    try {
+      if (args.account_name === 'ALL') {
+        const allEmails = await this.getAllGmailEmails(args);
+        return this.createResponse(requestId, { emails: allEmails });
+      } else {
+        const emails = await this.gmailHandler.listEmails(args.account_name, args);
+        return this.createResponse(requestId, { emails });
+      }
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  private async handleSearchEmails(args: any, requestId: any): Promise<MCPResponse> {
+    try {
+      if (args.account_name === 'ALL') {
+        const availableAccounts = this.gmailHandler.getAvailableAccounts();
+        const searchPromises = availableAccounts.map(account => 
+          this.gmailHandler.searchEmails(account, args.query, args.limit || 20)
+        );
+        const results = await Promise.all(searchPromises);
+        const allEmails = results.flat().sort((a, b) => 
+          new Date(b.date).getTime() - new Date(a.date).getTime()
+        ).slice(0, args.limit || 20);
+        return this.createResponse(requestId, { emails: allEmails });
+      } else {
+        const emails = await this.gmailHandler.searchEmails(args.account_name, args.query, args.limit || 20);
+        return this.createResponse(requestId, { emails });
+      }
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  private async handleGetEmailDetail(args: any, requestId: any): Promise<MCPResponse> {
+    try {
+      const emailDetail = await this.gmailHandler.getEmailDetail(args.account_name, args.email_id);
+      return this.createResponse(requestId, { email: emailDetail });
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  private async handleGetUnreadCount(args: any, requestId: any): Promise<MCPResponse> {
+    try {
+      if (args.account_name === 'ALL') {
+        const availableAccounts = this.gmailHandler.getAvailableAccounts();
+        const countPromises = availableAccounts.map(async (account) => {
+          const count = await this.gmailHandler.getUnreadCount(account, args.folder || 'INBOX');
+          return { account, count };
+        });
+        const results = await Promise.all(countPromises);
+        const totalCount = results.reduce((sum, result) => sum + result.count, 0);
+        return this.createResponse(requestId, { 
+          totalCount,
+          accountCounts: results
+        });
+      } else {
+        const count = await this.gmailHandler.getUnreadCount(args.account_name, args.folder || 'INBOX');
+        return this.createResponse(requestId, { count });
+      }
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  private async getAllGmailEmails(params: any): Promise<EmailMessage[]> {
+    const availableAccounts = this.gmailHandler.getAvailableAccounts();
+    const emailPromises = availableAccounts.map(account => 
+      this.gmailHandler.listEmails(account, params)
+    );
+    const results = await Promise.all(emailPromises);
+    return results.flat().sort((a, b) => 
+      new Date(b.date).getTime() - new Date(a.date).getTime()
+    ).slice(0, params.limit || 20);
+  }
+
+  private createResponse(id: any, result: any): MCPResponse {
+    return {
+      jsonrpc: '2.0',
+      id,
+      result
     };
   }
 
