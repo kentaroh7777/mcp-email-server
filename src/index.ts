@@ -2,17 +2,19 @@ import * as readline from 'readline';
 import * as dotenv from 'dotenv';
 import { MCPRequest, MCPResponse, InitializeResult, Tool, EmailMessage } from './types';
 import { GmailHandler, gmailTools } from './gmail';
+import { IMAPHandler, imapTools } from './imap';
 
 dotenv.config();
 
 export class MCPEmailServer {
   private gmailHandler: GmailHandler;
-  // Task 2, 3で使用予定
-  // private encryptionKey: string;
+  private imapHandler: IMAPHandler;
+  private encryptionKey: string;
 
   constructor() {
     this.gmailHandler = new GmailHandler();
-    // this.encryptionKey = process.env.EMAIL_ENCRYPTION_KEY || 'default-key';
+    this.encryptionKey = process.env.EMAIL_ENCRYPTION_KEY || 'default-key';
+    this.imapHandler = new IMAPHandler(this.encryptionKey);
   }
 
   async handleRequest(request: MCPRequest): Promise<MCPResponse> {
@@ -75,7 +77,8 @@ export class MCPEmailServer {
 
   private handleToolsList(request: MCPRequest): MCPResponse {
     const tools: Tool[] = [
-      ...gmailTools
+      ...gmailTools,
+      ...imapTools
     ];
 
     return {
@@ -101,6 +104,18 @@ export class MCPEmailServer {
         
         case 'get_unread_count':
           return await this.handleGetUnreadCount(args, request.id);
+        
+        case 'list_imap_emails':
+          return await this.handleListImapEmails(args, request.id);
+        
+        case 'search_imap_emails':
+          return await this.handleSearchImapEmails(args, request.id);
+        
+        case 'get_imap_email_detail':
+          return await this.handleGetImapEmailDetail(args, request.id);
+        
+        case 'get_imap_unread_count':
+          return await this.handleGetImapUnreadCount(args, request.id);
         
         default:
           return {
@@ -218,14 +233,50 @@ export class MCPEmailServer {
     };
   }
 
-  // 暗号化・復号化メソッド（Task 2, 3で使用予定）
-  // private encrypt(text: string): string {
-  //   return encrypt(text, this.encryptionKey);
-  // }
+  private async handleListImapEmails(args: any, requestId: any): Promise<MCPResponse> {
+    try {
+      const emails = await this.imapHandler.listEmails(args.account_name, args);
+      return this.createResponse(requestId, { emails });
+    } catch (error) {
+      throw error;
+    }
+  }
 
-  // private decrypt(encryptedText: string): string {
-  //   return decrypt(encryptedText, this.encryptionKey);
-  // }
+  private async handleSearchImapEmails(args: any, requestId: any): Promise<MCPResponse> {
+    try {
+      const emails = await this.imapHandler.searchEmails(args.account_name, args.query, args.limit || 20);
+      return this.createResponse(requestId, { emails });
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  private async handleGetImapEmailDetail(args: any, requestId: any): Promise<MCPResponse> {
+    try {
+      const emailDetail = await this.imapHandler.getEmailDetail(args.account_name, args.email_id);
+      return this.createResponse(requestId, { email: emailDetail });
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  private async handleGetImapUnreadCount(args: any, requestId: any): Promise<MCPResponse> {
+    try {
+      const count = await this.imapHandler.getUnreadCount(args.account_name, args.folder || 'INBOX');
+      return this.createResponse(requestId, { count });
+    } catch (error) {
+      throw error;
+    }
+  }
+
+  // Public methods for account management
+  addImapAccount(accountName: string, host: string, port: number, secure: boolean, user: string, encryptedPassword: string): void {
+    this.imapHandler.addAccount(accountName, { host, port, secure, user, password: encryptedPassword });
+  }
+
+  addXServerAccount(accountName: string, domain: string, username: string, encryptedPassword: string): void {
+    this.imapHandler.addXServerAccount(accountName, domain, username, encryptedPassword);
+  }
 }
 
 const server = new MCPEmailServer();
