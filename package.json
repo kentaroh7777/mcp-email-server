@@ -7,11 +7,13 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts",
+    "start:simple": "npx tsx run-email-server.ts",
+    "dev": "npx tsx run-email-server.ts",
     "clean": "rm -rf dist",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "test:simple": "node test/simple-test.js"
   },
   "keywords": [
     "mcp",
@@ -32,6 +34,7 @@
     "@types/node": "^20.19.1",
     "@types/node-imap": "^0.9.0",
     "ts-node": "^10.9.2",
+    "tsx": "^4.20.3",
     "typescript": "^5.3.3",
     "vitest": "^3.2.4"
   },
