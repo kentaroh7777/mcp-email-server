@@ -14,9 +14,6 @@ const encryptionKey = process.env.EMAIL_ENCRYPTION_KEY || 'default-key';
 const handler = new MCPEmailProtocolHandler(encryptionKey);
 
 // アカウント設定を環境変数から自動設定
-if (process.env.GMAIL_CLIENT_ID && process.env.GMAIL_CLIENT_SECRET) {
-  console.error('[INFO] Gmail configuration detected');
-}
 
 // IMAP アカウントの自動設定
 const imapAccounts = Object.keys(process.env)
@@ -32,7 +29,6 @@ for (const accountName of imapAccounts) {
   
   if (host && user && password) {
     handler.addImapAccount(accountName, host, port, secure, user, password);
-    console.error(`[INFO] IMAP account '${accountName}' configured`);
   }
 }
 
@@ -49,7 +45,6 @@ for (const accountName of xserverAccounts) {
   
   if (server && domain && username && password) {
     handler.addXServerAccount(accountName, server, domain, username, password);
-    console.error(`[INFO] XServer account '${accountName}' configured`);
   }
 }
 
@@ -59,10 +54,6 @@ const rl = readline.createInterface({
   output: process.stdout,
   terminal: false
 });
-
-// デバッグ情報の出力
-console.error('[INFO] MCP Email Server starting...');
-console.error(`[INFO] Encryption key: ${encryptionKey ? 'configured' : 'using default'}`);
 
 // 各行をJSONRPCリクエストとして処理
 rl.on('line', async (line: string) => {
@@ -88,16 +79,11 @@ rl.on('line', async (line: string) => {
 
 // プロセス終了時のクリーンアップ
 process.on('SIGINT', () => {
-  console.error('[INFO] Shutting down MCP Email Server...');
   rl.close();
   process.exit(0);
 });
 
 process.on('SIGTERM', () => {
-  console.error('[INFO] Shutting down MCP Email Server...');
   rl.close();
   process.exit(0);
-});
-
-// 起動完了メッセージ
-console.error('[INFO] MCP Email Server ready for requests'); 
+}); 
