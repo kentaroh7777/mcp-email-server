@@ -155,6 +155,19 @@ export class MCPEmailProtocolHandler {
                 required: ['account_name', 'email_id']
               }
             },
+            {
+              name: 'archive_email',
+              description: 'Archive a Gmail email (move from INBOX to Archive)',
+              inputSchema: {
+                type: 'object',
+                properties: {
+                  account_name: { type: 'string', enum: ['MAIN', 'WORK'] },
+                  email_id: { type: 'string' },
+                  remove_unread: { type: 'boolean', description: 'Whether to also remove UNREAD label (default: false)' }
+                },
+                required: ['account_name', 'email_id']
+              }
+            },
             // {
             //   name: 'get_unread_count',
             //   description: 'Get count of unread emails in a folder - DEPRECATED: 実際の未読数と異なるため非公開',
@@ -297,6 +310,9 @@ export class MCPEmailProtocolHandler {
         case 'get_email_detail':
           return await this.handleGetEmailDetail(args, requestId);
         
+        case 'archive_email':
+          return await this.handleArchiveEmail(args, requestId);
+        
         case 'get_unread_count':
           return await this.handleGetUnreadCount(args, requestId);
         
@@ -383,6 +399,25 @@ export class MCPEmailProtocolHandler {
       return this.createResponse(requestId, { email: emailDetail });
     } catch (error) {
       throw error;
+    }
+  }
+
+  private async handleArchiveEmail(args: any, requestId: any): Promise<MCPResponse> {
+    try {
+      // Map MAIN/WORK to actual account names
+      const actualAccountName = this.mapGmailAccountName(args.account_name);
+      const removeUnread = args.remove_unread || false;
+      const result = await this.gmailHandler.archiveEmail(actualAccountName, args.email_id, removeUnread);
+      return this.createResponse(requestId, { 
+        success: result,
+        message: result ? 'Email archived successfully' : 'Failed to archive email',
+        remove_unread: removeUnread
+      });
+    } catch (error) {
+      return this.createErrorResponse(requestId, {
+        code: -32603,
+        message: `Archive failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+      });
     }
   }
 

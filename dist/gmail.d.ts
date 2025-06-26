@@ -14,6 +14,8 @@ export declare class GmailHandler {
     getEmailDetail(accountName: string, emailId: string): Promise<EmailDetail>;
     getUnreadCount(accountName: string, folder?: string): Promise<number>;
     getAvailableAccounts(): string[];
+    markAsRead(accountName: string, emailId: string): Promise<boolean>;
+    archiveEmail(accountName: string, emailId: string): Promise<boolean>;
     private parseDateTime;
     private formatEmailMessage;
     private formatEmailDetail;

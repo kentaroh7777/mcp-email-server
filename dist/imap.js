@@ -485,6 +485,108 @@ export class IMAPHandler {
     getAvailableAccounts() {
         return Array.from(this.connections.keys());
     }
+    // 新機能: メールを既読にする
+    async markAsRead(accountName, emailId) {
+        let imap = null;
+        try {
+            imap = await this.getConnection(accountName);
+            await this.openBox(imap, 'INBOX');
+            return new Promise((resolve, reject) => {
+                let resolved = false;
+                const timeout = setTimeout(() => {
+                    if (!resolved) {
+                        resolved = true;
+                        reject(new Error(`IMAP markAsRead timeout after ${this.operationTimeout}ms`));
+                    }
+                }, this.operationTimeout);
+                // IMAPのUID形式でメールを識別
+                const uid = parseInt(emailId);
+                if (isNaN(uid)) {
+                    clearTimeout(timeout);
+                    resolved = true;
+                    reject(new Error('Invalid email ID format for IMAP'));
+                    return;
+                }
+                imap.setFlags(uid, ['\\Seen'], (err) => {
+                    if (resolved)
+                        return;
+                    clearTimeout(timeout);
+                    if (err) {
+                        resolved = true;
+                        reject(new Error(`Failed to mark email as read: ${err.message}`));
+                        return;
+                    }
+                    resolved = true;
+                    resolve(true);
+                });
+            });
+        }
+        catch (error) {
+            throw new Error(`IMAP markAsRead failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+        finally {
+            if (imap) {
+                try {
+                    imap.end();
+                }
+                catch (error) {
+                    // Ignore cleanup errors
+                }
+            }
+            this.connectionPool.delete(accountName);
+        }
+    }
+    // 新機能: メールをアーカイブする（INBOXからArchiveフォルダへ移動）
+    async archiveEmail(accountName, emailId) {
+        let imap = null;
+        try {
+            imap = await this.getConnection(accountName);
+            await this.openBox(imap, 'INBOX');
+            return new Promise((resolve, reject) => {
+                let resolved = false;
+                const timeout = setTimeout(() => {
+                    if (!resolved) {
+                        resolved = true;
+                        reject(new Error(`IMAP archiveEmail timeout after ${this.operationTimeout}ms`));
+                    }
+                }, this.operationTimeout);
+                // IMAPのUID形式でメールを識別
+                const uid = parseInt(emailId);
+                if (isNaN(uid)) {
+                    clearTimeout(timeout);
+                    resolved = true;
+                    reject(new Error('Invalid email ID format for IMAP'));
+                    return;
+                }
+                imap.move(uid, 'Archive', (err) => {
+                    if (resolved)
+                        return;
+                    clearTimeout(timeout);
+                    if (err) {
+                        resolved = true;
+                        reject(new Error(`Failed to archive email: ${err.message}`));
+                        return;
+                    }
+                    resolved = true;
+                    resolve(true);
+                });
+            });
+        }
+        catch (error) {
+            throw new Error(`IMAP archiveEmail failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+        finally {
+            if (imap) {
+                try {
+                    imap.end();
+                }
+                catch (error) {
+                    // Ignore cleanup errors
+                }
+            }
+            this.connectionPool.delete(accountName);
+        }
+    }
     // Special method for xserver domain support
     addXServerAccount(accountName, server, domain, username, encryptedPassword) {
         const config = {
