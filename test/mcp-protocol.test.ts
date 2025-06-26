@@ -48,7 +48,7 @@ describe('MCP Protocol Tests', () => {
       expect(toolNames).toContain('list_emails');
       expect(toolNames).toContain('search_emails');
       expect(toolNames).toContain('get_email_detail');
-      expect(toolNames).toContain('get_unread_count');
+      // get_unread_count は実際の未読数と異なるため非公開化
       
       // IMAPツール
       expect(toolNames).toContain('list_imap_emails');

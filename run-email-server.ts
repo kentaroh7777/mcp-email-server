@@ -1,11 +1,19 @@
-#!/usr/bin/env tsx
+#!/usr/bin/env node
+
+// .envファイルを読み込み
+import dotenv from 'dotenv';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+// プロジェクトルートの.envファイルを読み込み
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const envPath = join(__dirname, '.env');
+
+dotenv.config({ path: envPath });
 
 import { MCPEmailProtocolHandler } from './src/mcp-handler.js';
 import * as readline from 'readline';
-import * as dotenv from 'dotenv';
-
-// 環境変数を読み込み
-dotenv.config();
 
 // 暗号化キーを環境変数から取得
 const encryptionKey = process.env.EMAIL_ENCRYPTION_KEY || 'default-key';

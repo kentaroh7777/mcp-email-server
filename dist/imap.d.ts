@@ -2,10 +2,15 @@ import { IMAPConfig, EmailMessage, EmailDetail, ListEmailsParams, Tool } from '.
 export declare class IMAPHandler {
     private encryptionKey;
     private connections;
+    private connectionPool;
+    private readonly DEFAULT_TIMEOUT;
+    private readonly connectionTimeout;
+    private readonly operationTimeout;
     constructor(encryptionKey?: string);
     private loadIMAPConfigs;
     addAccount(accountName: string, config: IMAPConfig): void;
     private getConnection;
+    private createConnection;
     private openBox;
     listEmails(accountName: string, params?: ListEmailsParams): Promise<EmailMessage[]>;
     searchEmails(accountName: string, query: string, limit?: number): Promise<EmailMessage[]>;

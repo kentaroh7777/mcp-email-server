@@ -22,12 +22,12 @@ mcpServer.stdout.on('data', (data) => {
       try {
         const parsed = JSON.parse(line);
         console.log('📤 Response received:', JSON.stringify(parsed, null, 2));
-        responseCount++;
-        
-        if (responseCount >= expectedResponses) {
-          console.log('\n✅ Test completed successfully!');
-          mcpServer.kill();
-          process.exit(0);
+      responseCount++;
+      
+      if (responseCount >= expectedResponses) {
+        console.log('\n✅ Test completed successfully!');
+        mcpServer.kill();
+        process.exit(0);
         }
       } catch (error) {
         // JSONではない行はスキップ（サーバーのログなど）

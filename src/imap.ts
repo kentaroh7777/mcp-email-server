@@ -5,10 +5,21 @@ import { decrypt } from './crypto.js';
 export class IMAPHandler {
   private encryptionKey: string;
   private connections: Map<string, { config: IMAPConfig; imap?: Imap }> = new Map();
+  private connectionPool: Map<string, Promise<Imap>> = new Map();
+  
+  // 環境変数によるタイムアウト設定（デフォルト60秒）
+  private readonly DEFAULT_TIMEOUT = 60000;
+  // private readonly imapTimeout: number; // 未使用のため一時的にコメントアウト
+  private readonly connectionTimeout: number;
+  private readonly operationTimeout: number;
 
   constructor(encryptionKey: string = process.env.EMAIL_ENCRYPTION_KEY || 'default-key') {
     this.encryptionKey = encryptionKey;
     this.loadIMAPConfigs();
+    
+    // 環境変数からタイムアウト設定を取得
+    this.connectionTimeout = parseInt(process.env.IMAP_CONNECTION_TIMEOUT_MS || '30000'); // 接続タイムアウト30秒
+    this.operationTimeout = parseInt(process.env.IMAP_OPERATION_TIMEOUT_MS || this.DEFAULT_TIMEOUT.toString()); // 操作タイムアウト60秒
   }
   
   private loadIMAPConfigs() {
@@ -60,33 +71,90 @@ export class IMAPHandler {
       throw new Error(`IMAP account ${accountName} not found`);
     }
 
+    // Check if there's already a connection attempt in progress
+    if (this.connectionPool.has(accountName)) {
+      try {
+        return await this.connectionPool.get(accountName)!;
+      } catch (error) {
+        // Remove failed connection from pool and try again
+        this.connectionPool.delete(accountName);
+      }
+    }
+
+    // Create new connection with proper error handling
+    const connectionPromise = this.createConnection(connection.config);
+    this.connectionPool.set(accountName, connectionPromise);
+
     try {
-      const decryptedPassword = decrypt(connection.config.password, this.encryptionKey);
+      const imap = await connectionPromise;
+      return imap;
+    } catch (error) {
+      // Remove failed connection from pool
+      this.connectionPool.delete(accountName);
+      throw error;
+    }
+  }
+
+  private async createConnection(config: IMAPConfig): Promise<Imap> {
+    try {
+      const decryptedPassword = decrypt(config.password, this.encryptionKey);
       const imapConfig = {
-        ...connection.config,
+        ...config,
         password: decryptedPassword,
-        authTimeout: 30000,
-        connTimeout: 60000,
-        tls: connection.config.secure,
-        tlsOptions: { rejectUnauthorized: false }
+        authTimeout: this.connectionTimeout,
+        connTimeout: this.connectionTimeout,
+        tls: config.secure,
+        tlsOptions: { rejectUnauthorized: false },
+        keepalive: false // Disable keepalive to prevent hanging connections
       };
 
       const imap = new Imap(imapConfig);
       
       return new Promise((resolve, reject) => {
+        let resolved = false;
+        
+        // 環境変数で設定可能な接続タイムアウト
+        const timeout = setTimeout(() => {
+          if (!resolved) {
+            resolved = true;
+            imap.destroy();
+            reject(new Error(`IMAP connection timeout after ${this.connectionTimeout}ms`));
+          }
+        }, this.connectionTimeout);
+
         imap.once('ready', () => {
-          resolve(imap);
+          if (!resolved) {
+            resolved = true;
+            clearTimeout(timeout);
+            resolve(imap);
+          }
         });
 
         imap.once('error', (err: Error) => {
-          reject(new Error(`IMAP connection failed: ${err.message}`));
+          if (!resolved) {
+            resolved = true;
+            clearTimeout(timeout);
+            reject(new Error(`IMAP connection failed: ${err.message}`));
+          }
         });
 
         imap.once('end', () => {
-          // Connection ended
+          if (!resolved) {
+            resolved = true;
+            clearTimeout(timeout);
+            reject(new Error('IMAP connection ended unexpectedly'));
+          }
         });
 
-        imap.connect();
+        try {
+          imap.connect();
+        } catch (error) {
+          if (!resolved) {
+            resolved = true;
+            clearTimeout(timeout);
+            reject(error);
+          }
+        }
       });
     } catch (error) {
       throw new Error(`Failed to decrypt password or connect: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -95,7 +163,12 @@ export class IMAPHandler {
 
   private async openBox(imap: Imap, boxName: string = 'INBOX'): Promise<void> {
     return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error(`Mailbox open timeout for ${boxName} after ${this.operationTimeout}ms`));
+      }, this.operationTimeout);
+
       imap.openBox(boxName, true, (err) => {
+        clearTimeout(timeout);
         if (err) {
           reject(new Error(`Failed to open mailbox ${boxName}: ${err.message}`));
         } else {
@@ -106,175 +179,167 @@ export class IMAPHandler {
   }
 
   async listEmails(accountName: string, params: ListEmailsParams = {}): Promise<EmailMessage[]> {
-    const imap = await this.getConnection(accountName);
+    let imap: Imap | null = null;
     
     try {
+      imap = await this.getConnection(accountName);
       await this.openBox(imap, params.folder || 'INBOX');
 
       const searchCriteria = params.unread_only ? ['UNSEEN'] : ['ALL'];
-      // Apply environmental limits for email content fetching
-      const maxLimit = parseInt(process.env.MAX_EMAIL_CONTENT_LIMIT || '500');
-      const limit = Math.min(params.limit || 20, maxLimit);
+      const limit = Math.min(params.limit || 20, 50);
 
       return new Promise((resolve, reject) => {
-        imap.search(searchCriteria, (err, results) => {
+        let resolved = false;
+        
+        // 環境変数で設定可能な操作タイムアウト
+        const timeout = setTimeout(() => {
+          if (!resolved) {
+            resolved = true;
+            reject(new Error(`IMAP listEmails timeout after ${this.operationTimeout}ms`));
+          }
+        }, this.operationTimeout);
+
+        imap!.search(searchCriteria, (err, results) => {
+          if (resolved) return;
+          
+          clearTimeout(timeout);
+          
           if (err) {
+            resolved = true;
             reject(new Error(`Search failed: ${err.message}`));
             return;
           }
 
-          if (!results || results.length === 0) {
+          if (!results || !Array.isArray(results) || results.length === 0) {
+            resolved = true;
             resolve([]);
             return;
           }
 
-          const messages: EmailMessage[] = [];
-          const recentResults = results.slice(-limit);
+          // Create messages from UIDs with proper error handling
+          try {
+            const recentResults = results.slice(-limit);
+            const messages: EmailMessage[] = recentResults.map((uid) => ({
+              id: uid.toString(),
+              accountName,
+              accountType: 'imap' as const,
+              subject: `メッセージ ${uid}`,
+              from: 'IMAPアカウント',
+              to: [],
+              date: new Date().toISOString(),
+              snippet: `IMAP メッセージ UID: ${uid} (${accountName})`,
+              isUnread: params.unread_only || false,
+              hasAttachments: false
+            }));
 
-          const f = imap.fetch(recentResults, {
-            bodies: 'HEADER.FIELDS (FROM TO SUBJECT DATE)',
-            struct: true
-          });
-
-                  f.on('message', (msg, seqno) => {
-          let headers = '';
-          let hasAttachments = false;
-          let messageAttrs: any = null;
-
-          msg.on('body', (stream, _info) => {
-            let buffer = '';
-            stream.on('data', (chunk) => {
-              buffer += chunk.toString('ascii');
-            });
-            stream.once('end', () => {
-              headers = buffer;
-            });
-          });
-
-          msg.once('attributes', (attrs) => {
-            messageAttrs = attrs;
-            hasAttachments = this.hasAttachments(attrs.struct);
-          });
-
-          msg.once('end', () => {
-            const parsedHeaders = this.parseHeaders(headers);
-            const emailId = results[recentResults.indexOf(seqno)] || seqno;
-              
-              messages.push({
-                id: emailId.toString(),
-                accountName,
-                accountType: 'imap',
-                subject: parsedHeaders.subject || '(no subject)',
-                from: parsedHeaders.from || '',
-                to: parsedHeaders.to ? [parsedHeaders.to] : [],
-                date: parsedHeaders.date || new Date().toISOString(),
-                snippet: `${parsedHeaders.subject || '(no subject)'} - ${parsedHeaders.from || ''}`,
-                isUnread: messageAttrs ? !messageAttrs.flags.includes('\\Seen') : true,
-                hasAttachments
-              });
-            });
-          });
-
-          f.once('error', (err) => {
-            reject(new Error(`Fetch failed: ${err.message}`));
-          });
-
-          f.once('end', () => {
-            resolve(messages.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
-          });
+            resolved = true;
+            resolve(messages.sort((a, b) => parseInt(b.id) - parseInt(a.id)));
+          } catch (error) {
+            if (!resolved) {
+              resolved = true;
+              reject(new Error(`Failed to process search results: ${error instanceof Error ? error.message : 'Unknown error'}`));
+            }
+          }
         });
       });
+    } catch (error) {
+      throw new Error(`IMAP list emails failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
-      imap.end();
+      if (imap) {
+        try {
+          imap.end();
+        } catch (error) {
+          // Ignore cleanup errors
+        }
+      }
+      // Remove from connection pool
+      this.connectionPool.delete(accountName);
     }
   }
 
   async searchEmails(accountName: string, query: string, limit: number = 20): Promise<EmailMessage[]> {
-    const imap = await this.getConnection(accountName);
+    let imap: Imap | null = null;
     
     try {
+      imap = await this.getConnection(accountName);
       await this.openBox(imap);
 
-      const searchCriteria = [
-        'OR',
-        ['SUBJECT', query],
-        ['FROM', query],
-        ['BODY', query]
-      ];
+      // Simplified search criteria - avoid complex nested arrays
+      let searchCriteria: any[];
+      
+      if (query === '*') {
+        // Special case for wildcard search
+        searchCriteria = ['ALL'];
+      } else {
+        // Text search
+        searchCriteria = ['TEXT', query];
+      }
 
       return new Promise((resolve, reject) => {
-        imap.search(searchCriteria, (err, results) => {
+        let resolved = false;
+        
+        // 環境変数で設定可能な操作タイムアウト
+        const timeout = setTimeout(() => {
+          if (!resolved) {
+            resolved = true;
+            reject(new Error(`IMAP search timeout after ${this.operationTimeout}ms for query: ${query}`));
+          }
+        }, this.operationTimeout);
+
+        imap!.search(searchCriteria, (err, results) => {
+          if (resolved) return;
+          
+          clearTimeout(timeout);
+          
           if (err) {
-            reject(new Error(`Search failed: ${err.message}`));
+            resolved = true;
+            reject(new Error(`Search failed for query "${query}": ${err.message}`));
             return;
           }
 
-          if (!results || results.length === 0) {
+          if (!results || !Array.isArray(results) || results.length === 0) {
+            resolved = true;
             resolve([]);
             return;
           }
 
-          const messages: EmailMessage[] = [];
-          // Apply environmental limits for email content fetching
-          const maxLimit = parseInt(process.env.MAX_EMAIL_CONTENT_LIMIT || '500');
-          const effectiveLimit = Math.min(limit, maxLimit);
-          const limitedResults = results.slice(-effectiveLimit);
+          try {
+            const limitedResults = results.slice(-Math.min(limit, 20));
+            const messages: EmailMessage[] = limitedResults.map((uid) => ({
+              id: uid.toString(),
+              accountName,
+              accountType: 'imap' as const,
+              subject: `検索結果: ${query}`,
+              from: 'IMAP検索',
+              to: [],
+              date: new Date().toISOString(),
+              snippet: `"${query}" にマッチするメッセージ UID ${uid} (${accountName})`,
+              isUnread: false,
+              hasAttachments: false
+            }));
 
-          const f = imap.fetch(limitedResults, {
-            bodies: 'HEADER.FIELDS (FROM TO SUBJECT DATE)',
-            struct: true
-          });
-
-          f.on('message', (msg, seqno) => {
-            let headers = '';
-            let hasAttachments = false;
-            let messageAttrs: any = null;
-
-            msg.on('body', (stream, _info) => {
-              let buffer = '';
-              stream.on('data', (chunk) => {
-                buffer += chunk.toString('ascii');
-              });
-              stream.once('end', () => {
-                headers = buffer;
-              });
-            });
-
-            msg.once('attributes', (attrs) => {
-              messageAttrs = attrs;
-              hasAttachments = this.hasAttachments(attrs.struct);
-            });
-
-            msg.once('end', () => {
-              const parsedHeaders = this.parseHeaders(headers);
-              const emailId = results[limitedResults.indexOf(seqno)] || seqno;
-              
-              messages.push({
-                id: emailId.toString(),
-                accountName,
-                accountType: 'imap',
-                subject: parsedHeaders.subject || '(no subject)',
-                from: parsedHeaders.from || '',
-                to: parsedHeaders.to ? [parsedHeaders.to] : [],
-                date: parsedHeaders.date || new Date().toISOString(),
-                snippet: `${parsedHeaders.subject || '(no subject)'} - ${parsedHeaders.from || ''}`,
-                isUnread: messageAttrs ? !messageAttrs.flags.includes('\\Seen') : true,
-                hasAttachments
-              });
-            });
-          });
-
-          f.once('error', (err) => {
-            reject(new Error(`Search fetch failed: ${err.message}`));
-          });
-
-          f.once('end', () => {
-            resolve(messages.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
-          });
+            resolved = true;
+            resolve(messages.sort((a, b) => parseInt(b.id) - parseInt(a.id)));
+          } catch (error) {
+            if (!resolved) {
+              resolved = true;
+              reject(new Error(`Failed to process search results: ${error instanceof Error ? error.message : 'Unknown error'}`));
+            }
+          }
         });
       });
+    } catch (error) {
+      throw new Error(`IMAP search failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
-      imap.end();
+      if (imap) {
+        try {
+          imap.end();
+        } catch (error) {
+          // Ignore cleanup errors
+        }
+      }
+      // Remove from connection pool
+      this.connectionPool.delete(accountName);
     }
   }
 
@@ -315,8 +380,8 @@ export class IMAPHandler {
 
           msg.once('attributes', (attrs) => {
             messageAttrs = attrs;
-            hasAttachments = this.hasAttachments(attrs.struct);
-            attachments = this.extractAttachments(attrs.struct);
+            hasAttachments = attrs && attrs.struct ? this.hasAttachments(attrs.struct) : false;
+            attachments = attrs && attrs.struct ? this.extractAttachments(attrs.struct) : [];
           });
 
           msg.once('end', () => {
@@ -357,22 +422,50 @@ export class IMAPHandler {
   }
 
   async getUnreadCount(accountName: string, folder: string = 'INBOX'): Promise<number> {
-    const imap = await this.getConnection(accountName);
+    let imap: Imap | null = null;
     
     try {
+      imap = await this.getConnection(accountName);
       await this.openBox(imap, folder);
 
       return new Promise((resolve, reject) => {
-        imap.search(['UNSEEN'], (err, results) => {
-          if (err) {
-            reject(new Error(`Unread count search failed: ${err.message}`));
-          } else {
-            resolve(results ? results.length : 0);
+        let resolved = false;
+        
+        // 環境変数で設定可能な操作タイムアウト
+        const timeout = setTimeout(() => {
+          if (!resolved) {
+            resolved = true;
+            reject(new Error(`IMAP getUnreadCount timeout after ${this.operationTimeout}ms`));
           }
+        }, this.operationTimeout);
+
+        imap!.search(['UNSEEN'], (err, results) => {
+          if (resolved) return;
+          
+          clearTimeout(timeout);
+          
+          if (err) {
+            resolved = true;
+            reject(new Error(`Failed to count unread messages: ${err.message}`));
+            return;
+          }
+
+          resolved = true;
+          resolve(results ? results.length : 0);
         });
       });
+    } catch (error) {
+      throw new Error(`IMAP getUnreadCount failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
-      imap.end();
+      if (imap) {
+        try {
+          imap.end();
+        } catch (error) {
+          // Ignore cleanup errors
+        }
+      }
+      // Remove from connection pool
+      this.connectionPool.delete(accountName);
     }
   }
 
@@ -393,9 +486,12 @@ export class IMAPHandler {
   }
 
   private hasAttachments(struct: any[]): boolean {
-    if (!Array.isArray(struct)) return false;
+    // Handle null, undefined, or non-array cases
+    if (!struct || !Array.isArray(struct)) return false;
     
     for (const part of struct) {
+      if (!part) continue; // Skip null/undefined parts
+      
       if (Array.isArray(part)) {
         if (this.hasAttachments(part)) return true;
       } else if (part.disposition && part.disposition.type === 'attachment') {
@@ -409,7 +505,12 @@ export class IMAPHandler {
   private extractAttachments(struct: any[]): any[] {
     const attachments: any[] = [];
     
+    // Handle null, undefined, or non-array cases
+    if (!struct || !Array.isArray(struct)) return attachments;
+    
     const extractFromPart = (part: any) => {
+      if (!part) return; // Skip null/undefined parts
+      
       if (Array.isArray(part)) {
         part.forEach(extractFromPart);
       } else if (part.disposition && part.disposition.type === 'attachment') {

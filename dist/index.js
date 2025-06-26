@@ -10,6 +10,8 @@ export class MCPEmailServer {
         this.imapHandler = new IMAPHandler(this.encryptionKey);
     }
     async handleRequest(request) {
+        // Debug: Log incoming requests
+        // console.error(`[MCP DEBUG] Incoming request: ${JSON.stringify(request, null, 2)}`);
         try {
             switch (request.method) {
                 case 'initialize':
@@ -271,11 +273,22 @@ export class MCPEmailServer {
         return results.flat().sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, params.limit || 20);
     }
     createResponse(id, result) {
-        return {
+        // Convert all responses to MCP-compatible format like mcp-todoist
+        const response = {
             jsonrpc: '2.0',
             id,
-            result
+            result: {
+                content: [
+                    {
+                        type: 'text',
+                        text: JSON.stringify(result, null, 2)
+                    }
+                ]
+            }
         };
+        // Debug: Log outgoing responses
+        // console.error(`[MCP DEBUG] Outgoing response: ${JSON.stringify(response, null, 2)}`);
+        return response;
     }
     async handleListImapEmails(args, requestId) {
         try {
@@ -573,12 +586,15 @@ const rl = readline.createInterface({
     terminal: false
 });
 rl.on('line', async (line) => {
+    // console.error(`[MCP DEBUG] Raw input: ${line.trim()}`);
     try {
         const request = JSON.parse(line.trim());
         const response = await server.handleRequest(request);
+        // console.error(`[MCP DEBUG] Sending response: ${JSON.stringify(response, null, 2)}`);
         console.log(JSON.stringify(response));
     }
     catch (error) {
+        // console.error(`[MCP DEBUG] Parse error: ${error}`);
         const errorResponse = {
             jsonrpc: '2.0',
             id: null,

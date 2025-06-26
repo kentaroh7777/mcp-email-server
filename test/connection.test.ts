@@ -15,11 +15,15 @@ describe('Connection Tests', () => {
       
       expect(response.error).toBeUndefined();
       expect(response.result).toBeDefined();
-      expect(response.result.accounts).toBeDefined();
-      expect(Array.isArray(response.result.accounts)).toBe(true);
+      
+      // MCP形式のレスポンスからデータを抽出
+      const data = response.result.content?.[0]?.text ? JSON.parse(response.result.content[0].text) : null;
+      expect(data).toBeDefined();
+      expect(data.accounts).toBeDefined();
+      expect(Array.isArray(data.accounts)).toBe(true);
       
       // 実際の状態検証: 設定されたアカウント数と一致するか
-      const accountList = response.result.accounts;
+      const accountList = data.accounts;
       const totalConfigured = configuredAccounts.gmail.length + 
                             configuredAccounts.imap.length + 
                             configuredAccounts.xserver.length;
@@ -42,7 +46,8 @@ describe('Connection Tests', () => {
       const response = await helper.callTool('list_accounts', {});
       expect(response.error).toBeUndefined();
       
-      const accounts = response.result.accounts;
+      const data = response.result.content?.[0]?.text ? JSON.parse(response.result.content[0].text) : null;
+      const accounts = data?.accounts || [];
       const hasExpectedType = accounts.some((acc: any) => acc.type === expectedType);
       
       // 設定されているアカウントタイプがある場合は、リストに含まれているべき
@@ -175,10 +180,12 @@ describe('Connection Tests', () => {
       });
       
       expect(response.error).toBeUndefined();
-      expect(response.result.emails).toBeDefined();
-      expect(Array.isArray(response.result.emails)).toBe(true);
-      expect(response.result.totalFound).toBeDefined();
-      expect(typeof response.result.totalFound).toBe('number');
+      const data = response.result.content?.[0]?.text ? JSON.parse(response.result.content[0].text) : null;
+      expect(data).toBeDefined();
+      expect(data.emails).toBeDefined();
+      expect(Array.isArray(data.emails)).toBe(true);
+      expect(data.totalFound).toBeDefined();
+      expect(typeof data.totalFound).toBe('number');
     });
 
     test('Gmail のみの検索が動作する', async () => {
@@ -209,17 +216,20 @@ describe('Connection Tests', () => {
       expect(response.error).toBeUndefined();
       expect(response.result).toBeDefined();
       
+      // MCP形式のレスポンスからデータを抽出
+      const data = response.result.content?.[0]?.text ? JSON.parse(response.result.content[0].text) : null;
+      expect(data).toBeDefined();
+      
       // 実際の状態検証: 統計情報の構造が正しいか
-      const stats = response.result;
-      expect(stats.gmail).toBeDefined();
-      expect(stats.imap).toBeDefined();
-      expect(stats.summary).toBeDefined();
-      expect(typeof stats.summary.totalAccounts).toBe('number');
-      expect(typeof stats.summary.connectedAccounts).toBe('number');
-      expect(typeof stats.summary.totalUnreadEmails).toBe('number');
+      expect(data.gmail).toBeDefined();
+      expect(data.imap).toBeDefined();
+      expect(data.summary).toBeDefined();
+      expect(typeof data.summary.totalAccounts).toBe('number');
+      expect(typeof data.summary.connectedAccounts).toBe('number');
+      expect(typeof data.summary.totalUnreadEmails).toBe('number');
       
       // 設定されたアカウント数と統計の整合性
-      expect(stats.summary.totalAccounts).toBe(configuredAccounts.gmail.length + configuredAccounts.imap.length + configuredAccounts.xserver.length);
+      expect(data.summary.totalAccounts).toBe(configuredAccounts.gmail.length + configuredAccounts.imap.length + configuredAccounts.xserver.length);
     });
   });
 }); 

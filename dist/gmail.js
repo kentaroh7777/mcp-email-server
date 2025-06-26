@@ -2,7 +2,34 @@ import { google } from 'googleapis';
 export class GmailHandler {
     constructor() {
         this.configs = new Map();
+        // 環境変数によるタイムアウト設定（デフォルト60秒）
+        this.DEFAULT_TIMEOUT = 60000;
         this.loadGmailConfigs();
+        this.gmailTimeout = parseInt(process.env.GMAIL_TIMEOUT_MS || this.DEFAULT_TIMEOUT.toString());
+        // タイムゾーンの決定（優先順位付き）
+        this.defaultTimezone = this.detectTimezone();
+    }
+    detectTimezone() {
+        // 1. システムのTZ環境変数を最優先
+        if (process.env.TZ) {
+            return process.env.TZ;
+        }
+        // 2. 独自のEMAIL_DEFAULT_TIMEZONE環境変数
+        if (process.env.EMAIL_DEFAULT_TIMEZONE) {
+            return process.env.EMAIL_DEFAULT_TIMEZONE;
+        }
+        // 3. システムのタイムゾーンを検出
+        try {
+            const systemTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+            if (systemTimezone) {
+                return systemTimezone;
+            }
+        }
+        catch (error) {
+            // システム検出に失敗した場合は下記のデフォルトを使用
+        }
+        // 4. デフォルト（日本時間）
+        return 'Asia/Tokyo';
     }
     loadGmailConfigs() {
         // First try the new format (GMAIL_ACCESS_TOKEN_accountname)
@@ -46,16 +73,32 @@ export class GmailHandler {
         if (!config) {
             throw new Error(`Gmail account ${accountName} not configured`);
         }
+        // Create OAuth2 client with proper timeout settings
         const oauth2Client = new google.auth.OAuth2(config.clientId, config.clientSecret, 'http://localhost');
+        // Set credentials and configure timeouts
         oauth2Client.setCredentials({
             refresh_token: config.refreshToken
         });
+        // Add timeout handling for token refresh
         oauth2Client.on('tokens', (tokens) => {
             if (tokens.refresh_token) {
                 // Token refresh handled automatically
             }
         });
-        return google.gmail({ version: 'v1', auth: oauth2Client });
+        // Create Gmail client with environment-configurable timeout
+        const gmail = google.gmail({
+            version: 'v1',
+            auth: oauth2Client,
+            timeout: this.gmailTimeout // 環境変数で設定可能（デフォルト60秒）
+        });
+        // Test the connection immediately with a simple call
+        try {
+            await gmail.users.getProfile({ userId: 'me' });
+            return gmail;
+        }
+        catch (error) {
+            throw new Error(`Gmail authentication failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
     }
     async listEmails(accountName, params) {
         try {
@@ -67,22 +110,42 @@ export class GmailHandler {
                 query += `label:${params.folder} `;
             }
             // Apply environmental limits for email content fetching
-            const maxLimit = parseInt(process.env.MAX_EMAIL_CONTENT_LIMIT || '500');
+            const maxLimit = parseInt(process.env.MAX_EMAIL_CONTENT_LIMIT || '50');
             const effectiveLimit = Math.min(params.limit || 20, maxLimit);
+            // Gmail API呼び出し（MCP仕様準拠の適切なタイムアウト）
             const response = await gmail.users.messages.list({
                 userId: 'me',
                 q: query.trim() || undefined,
                 maxResults: effectiveLimit
             });
             const messages = response.data.messages || [];
-            const emailPromises = messages.map(async (message) => {
-                const detail = await gmail.users.messages.get({
-                    userId: 'me',
-                    id: message.id,
-                    format: 'metadata',
-                    metadataHeaders: ['Subject', 'From', 'To', 'Date']
-                });
-                return this.formatEmailMessage(detail.data, accountName);
+            // メッセージ詳細の取得（並列処理で効率化）
+            const emailPromises = messages.slice(0, Math.min(messages.length, 20)).map(async (message) => {
+                try {
+                    const detail = await gmail.users.messages.get({
+                        userId: 'me',
+                        id: message.id,
+                        format: 'metadata',
+                        metadataHeaders: ['Subject', 'From', 'To', 'Date']
+                    });
+                    return this.formatEmailMessage(detail.data, accountName);
+                }
+                catch (error) {
+                    // 個別メッセージの失敗は警告として処理
+                    console.warn(`Failed to load message ${message.id}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+                    return {
+                        id: message.id || 'unknown',
+                        accountName,
+                        accountType: 'gmail',
+                        subject: 'メッセージの読み込みに失敗',
+                        from: 'Unknown',
+                        to: [],
+                        date: new Date().toISOString(),
+                        snippet: `メッセージを読み込めませんでした: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                        isUnread: false,
+                        hasAttachments: false
+                    };
+                }
             });
             return await Promise.all(emailPromises);
         }
@@ -90,26 +153,56 @@ export class GmailHandler {
             throw new Error(`Failed to list emails for ${accountName}: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
     }
-    async searchEmails(accountName, query, limit) {
+    async searchEmails(accountName, query, limit, dateAfter, dateBefore) {
         try {
             const gmail = await this.authenticate(accountName);
             // Apply environmental limits for email content fetching
-            const maxLimit = parseInt(process.env.MAX_EMAIL_CONTENT_LIMIT || '500');
+            const maxLimit = parseInt(process.env.MAX_EMAIL_CONTENT_LIMIT || '50');
             const effectiveLimit = Math.min(limit, maxLimit);
+            // 期間指定クエリの構築
+            let searchQuery = query;
+            if (dateAfter) {
+                const afterTimestamp = this.parseDateTime(dateAfter);
+                searchQuery += ` after:${afterTimestamp}`;
+            }
+            if (dateBefore) {
+                const beforeTimestamp = this.parseDateTime(dateBefore);
+                searchQuery += ` before:${beforeTimestamp}`;
+            }
+            // Gmail検索API呼び出し（MCP仕様準拠）
             const response = await gmail.users.messages.list({
                 userId: 'me',
-                q: query,
+                q: searchQuery,
                 maxResults: effectiveLimit
             });
             const messages = response.data.messages || [];
-            const emailPromises = messages.map(async (message) => {
-                const detail = await gmail.users.messages.get({
-                    userId: 'me',
-                    id: message.id,
-                    format: 'metadata',
-                    metadataHeaders: ['Subject', 'From', 'To', 'Date']
-                });
-                return this.formatEmailMessage(detail.data, accountName);
+            // メッセージ詳細の取得（並列処理で効率化）
+            const emailPromises = messages.slice(0, Math.min(messages.length, 20)).map(async (message) => {
+                try {
+                    const detail = await gmail.users.messages.get({
+                        userId: 'me',
+                        id: message.id,
+                        format: 'metadata',
+                        metadataHeaders: ['Subject', 'From', 'To', 'Date']
+                    });
+                    return this.formatEmailMessage(detail.data, accountName);
+                }
+                catch (error) {
+                    // 個別メッセージの失敗は警告として処理
+                    console.warn(`Failed to load search result ${message.id}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+                    return {
+                        id: message.id || 'unknown',
+                        accountName,
+                        accountType: 'gmail',
+                        subject: '検索結果の読み込みに失敗',
+                        from: 'Unknown',
+                        to: [],
+                        date: new Date().toISOString(),
+                        snippet: `検索結果を読み込めませんでした: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                        isUnread: false,
+                        hasAttachments: false
+                    };
+                }
             });
             return await Promise.all(emailPromises);
         }
@@ -138,31 +231,20 @@ export class GmailHandler {
             if (folder !== 'INBOX') {
                 query += ` label:${folder}`;
             }
-            // Method 1: Try to get more accurate count using a large maxResults
-            // Gmail API has a limit of 500 per request, so we'll use pagination if needed
-            let totalCount = 0;
-            let pageToken;
-            const maxPerPage = parseInt(process.env.MAX_EMAIL_FETCH_PER_PAGE || '500');
-            // Get configurable number of pages for balance of accuracy vs performance
-            const maxPages = parseInt(process.env.MAX_EMAIL_FETCH_PAGES || '2');
-            let pageCount = 0;
-            do {
-                const response = await gmail.users.messages.list({
-                    userId: 'me',
-                    q: query,
-                    maxResults: maxPerPage,
-                    pageToken
-                });
-                const currentPageCount = response.data.messages?.length || 0;
-                totalCount += currentPageCount;
-                pageToken = response.data.nextPageToken || undefined;
-                pageCount++;
-                // If we got less than maxPerPage, we've reached the end
-                if (currentPageCount < maxPerPage) {
-                    break;
-                }
-            } while (pageToken && pageCount < maxPages);
-            return totalCount;
+            // より正確な未読数取得（MCP仕様準拠の適切なタイムアウト）
+            const response = await gmail.users.messages.list({
+                userId: 'me',
+                q: query,
+                maxResults: 100 // 最初の100件で推定
+            });
+            // 実際の件数または推定値を返す
+            const messageCount = response.data.messages?.length || 0;
+            const resultSizeEstimate = response.data.resultSizeEstimate || 0;
+            // 100件ちょうど取得できて、推定値がより大きい場合は推定値を使用
+            if (messageCount === 100 && resultSizeEstimate > 100) {
+                return resultSizeEstimate; // Gmailの推定値を使用
+            }
+            return messageCount;
         }
         catch (error) {
             throw new Error(`Failed to get unread count for ${accountName}: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -170,6 +252,47 @@ export class GmailHandler {
     }
     getAvailableAccounts() {
         return Array.from(this.configs.keys());
+    }
+    parseDateTime(dateTimeInput) {
+        // Unix timestamp（秒）で指定された場合はそのまま使用
+        if (/^\d+$/.test(dateTimeInput)) {
+            return dateTimeInput;
+        }
+        // ISO 8601形式（YYYY-MM-DDTHH:mm:ss[Z|±HH:mm]）の場合
+        if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(dateTimeInput)) {
+            // タイムゾーン情報が含まれている場合はそのまま使用
+            if (/[Z]$|[+-]\d{2}:\d{2}$/.test(dateTimeInput)) {
+                const date = new Date(dateTimeInput);
+                return Math.floor(date.getTime() / 1000).toString();
+            }
+            // タイムゾーン情報がない場合はデフォルトタイムゾーンを適用
+            else {
+                const date = new Date(dateTimeInput);
+                // デフォルトタイムゾーン情報をログ出力（デバッグ用）
+                console.debug(`Using default timezone: ${this.defaultTimezone} for ${dateTimeInput}`);
+                // ローカル時刻として解釈されるため、デフォルトタイムゾーンでの時刻として扱う
+                const utcTime = date.getTime() - (date.getTimezoneOffset() * 60000);
+                return Math.floor(utcTime / 1000).toString();
+            }
+        }
+        // 日付形式（YYYY/MM/DD）の場合
+        if (/^\d{4}\/\d{2}\/\d{2}$/.test(dateTimeInput)) {
+            return dateTimeInput; // Gmail APIの日付形式としてそのまま使用
+        }
+        // 日時形式（YYYY/MM/DD HH:mm:ss）の場合
+        if (/^\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}$/.test(dateTimeInput)) {
+            const [datePart, timePart] = dateTimeInput.split(' ');
+            const [year, month, day] = datePart.split('/');
+            const [hour, minute, second] = timePart.split(':');
+            // デフォルトタイムゾーンでの時刻として解釈
+            console.debug(`Using default timezone: ${this.defaultTimezone} for ${dateTimeInput}`);
+            const date = new Date();
+            date.setFullYear(parseInt(year), parseInt(month) - 1, parseInt(day));
+            date.setHours(parseInt(hour), parseInt(minute), parseInt(second), 0);
+            return Math.floor(date.getTime() / 1000).toString();
+        }
+        // その他の形式はそのまま返す（Gmail APIが解釈）
+        return dateTimeInput;
     }
     formatEmailMessage(message, accountName) {
         const headers = message.payload?.headers || [];
@@ -254,7 +377,7 @@ export const gmailTools = [
     },
     {
         name: 'search_emails',
-        description: 'Search emails in Gmail account',
+        description: 'Search emails in Gmail account with optional date range',
         inputSchema: {
             type: 'object',
             properties: {
@@ -264,7 +387,9 @@ export const gmailTools = [
                     default: 'ALL'
                 },
                 query: { type: 'string' },
-                limit: { type: 'number', default: 20, maximum: 100 }
+                limit: { type: 'number', default: 20, maximum: 100 },
+                date_after: { type: 'string', description: 'Search emails after this date/time (formats: YYYY/MM/DD, YYYY/MM/DD HH:mm:ss, YYYY-MM-DDTHH:mm:ss[Z|±HH:mm], or Unix timestamp). Timezone: TZ env var > EMAIL_DEFAULT_TIMEZONE env var > system timezone > Asia/Tokyo' },
+                date_before: { type: 'string', description: 'Search emails before this date/time (formats: YYYY/MM/DD, YYYY/MM/DD HH:mm:ss, YYYY-MM-DDTHH:mm:ss[Z|±HH:mm], or Unix timestamp). Timezone: TZ env var > EMAIL_DEFAULT_TIMEZONE env var > system timezone > Asia/Tokyo' }
             },
             required: ['query']
         }
@@ -284,20 +409,20 @@ export const gmailTools = [
             required: ['account_name', 'email_id']
         }
     },
-    {
-        name: 'get_unread_count',
-        description: 'Get count of unread emails in a folder',
-        inputSchema: {
-            type: 'object',
-            properties: {
-                account_name: {
-                    type: 'string',
-                    enum: ['MAIN', 'WORK', 'ALL'],
-                    default: 'ALL'
-                },
-                folder: { type: 'string', default: 'INBOX' }
-            }
-        }
-    }
+    // {
+    //   name: 'get_unread_count',
+    //   description: 'Get count of unread emails in a folder - DEPRECATED: 実際の未読数と異なるため非公開',
+    //   inputSchema: {
+    //     type: 'object',
+    //     properties: {
+    //       account_name: { 
+    //         type: 'string', 
+    //         enum: ['MAIN', 'WORK', 'ALL'],
+    //         default: 'ALL'
+    //       },
+    //       folder: { type: 'string', default: 'INBOX' }
+    //     }
+    //   }
+    // }
 ];
 //# sourceMappingURL=gmail.js.map

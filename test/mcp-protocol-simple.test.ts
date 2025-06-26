@@ -53,10 +53,10 @@ describe('MCPEmailProtocolHandler', () => {
       expect(Array.isArray(response.result.tools)).toBe(true);
       expect(response.result.tools.length).toBeGreaterThan(0);
       
-      // Check for expected tools
+      // Check for expected tools (NEW ARCHITECTURE NAMES)
       const toolNames = response.result.tools.map((tool: any) => tool.name);
-      expect(toolNames).toContain('gmail_list_emails');
-      expect(toolNames).toContain('imap_list_emails');
+      expect(toolNames).toContain('list_emails');
+      expect(toolNames).toContain('list_imap_emails');
       expect(toolNames).toContain('list_accounts');
       expect(toolNames).toContain('test_connection');
     });
@@ -181,8 +181,12 @@ describe('MCPEmailProtocolHandler', () => {
 
       expect(response.jsonrpc).toBe('2.0');
       expect(response.id).toBe(5);
-      expect(response.result).toHaveProperty('accounts');
-      expect(Array.isArray(response.result.accounts)).toBe(true);
+      
+      // mcp-todoist形式のレスポンスをパース
+      const data = response.result.content?.[0]?.text ? JSON.parse(response.result.content[0].text) : null;
+      expect(data).toBeDefined();
+      expect(data).toHaveProperty('accounts');
+      expect(Array.isArray(data.accounts)).toBe(true);
     });
 
     it('should return error for unknown tool', async () => {

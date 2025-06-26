@@ -326,10 +326,18 @@ export class MCPEmailServer {
   }
 
   private createResponse(id: any, result: any): MCPResponse {
+    // Convert all responses to MCP-compatible format like mcp-todoist
     const response: MCPResponse = {
       jsonrpc: '2.0' as const,
       id,
-      result
+      result: {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(result, null, 2)
+          }
+        ]
+      }
     };
     // Debug: Log outgoing responses
     // console.error(`[MCP DEBUG] Outgoing response: ${JSON.stringify(response, null, 2)}`);

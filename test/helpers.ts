@@ -8,12 +8,34 @@ export class TestHelper {
     this.server = new MCPEmailServer();
   }
 
+  // MCP-todoist形式のレスポンスから実際のデータを抽出
+  private extractMCPData(response: MCPResponse): any {
+    if (response.error) return null;
+    if (!response.result) return null;
+    
+    // mcp-todoist形式: {content: [{type: 'text', text: JSON.stringify(data)}]}
+    if (response.result.content && Array.isArray(response.result.content)) {
+      const textContent = response.result.content.find((c: any) => c.type === 'text');
+      if (textContent && textContent.text) {
+        try {
+          return JSON.parse(textContent.text);
+        } catch (e) {
+          console.error('Failed to parse MCP content:', e);
+          return null;
+        }
+      }
+    }
+    
+    return response.result;
+  }
+
   // 実際の状態検証のためのヘルパーメソッド
   async verifyAccountExists(accountName: string): Promise<boolean> {
     const response = await this.callTool('list_accounts', {});
     if (response.error) return false;
     
-    const accounts = response.result.accounts || [];
+    const data = this.extractMCPData(response);
+    const accounts = data?.accounts || [];
     return accounts.some((acc: any) => acc.name === accountName);
   }
 
@@ -23,9 +45,10 @@ export class TestHelper {
       return { connected: false, message: response.error.message };
     }
     
+    const data = this.extractMCPData(response);
     return {
-      connected: response.result.status === 'connected',
-      message: response.result.testResult || 'Unknown status'
+      connected: data?.status === 'connected',
+      message: data?.testResult || 'Unknown status'
     };
   }
 
@@ -47,13 +70,14 @@ export class TestHelper {
       return { valid: false, actual: -1 };
     }
     
-    // response.resultの構造を確認
+    // MCP形式のレスポンスからデータを抽出
+    const data = this.extractMCPData(response);
     let count = -1;
-    if (response.result && typeof response.result === 'object') {
-      if ('count' in response.result) {
-        count = response.result.count;
-      } else if ('unreadCount' in response.result) {
-        count = response.result.unreadCount;
+    if (data && typeof data === 'object') {
+      if ('count' in data) {
+        count = data.count;
+      } else if ('unreadCount' in data) {
+        count = data.unreadCount;
       }
     }
     
@@ -74,11 +98,11 @@ export class TestHelper {
       return { valid: false, count: 0, errors: [response.error.message] };
     }
     
-    const result = response.result;
+    const data = this.extractMCPData(response);
     return {
-      valid: result.emails.length >= expectedMinimum,
-      count: result.emails.length,
-      errors: result.errors || []
+      valid: (data?.emails?.length || 0) >= expectedMinimum,
+      count: data?.emails?.length || 0,
+      errors: data?.errors || []
     };
   }
 
