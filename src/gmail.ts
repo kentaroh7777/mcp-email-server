@@ -1,5 +1,5 @@
 import { google, gmail_v1 } from 'googleapis';
-import { GmailConfig, EmailMessage, EmailDetail, ListEmailsParams, Tool } from './types';
+import { GmailConfig, EmailMessage, EmailDetail, ListEmailsParams, Tool } from './types.js';
 
 export class GmailHandler {
   private configs: Map<string, GmailConfig> = new Map();
@@ -85,10 +85,14 @@ export class GmailHandler {
         query += `label:${params.folder} `;
       }
 
+      // Apply environmental limits for email content fetching
+      const maxLimit = parseInt(process.env.MAX_EMAIL_CONTENT_LIMIT || '500');
+      const effectiveLimit = Math.min(params.limit || 20, maxLimit);
+
       const response = await gmail.users.messages.list({
         userId: 'me',
         q: query.trim() || undefined,
-        maxResults: params.limit || 20
+        maxResults: effectiveLimit
       });
 
       const messages = response.data.messages || [];
@@ -113,10 +117,14 @@ export class GmailHandler {
     try {
       const gmail = await this.authenticate(accountName);
 
+      // Apply environmental limits for email content fetching
+      const maxLimit = parseInt(process.env.MAX_EMAIL_CONTENT_LIMIT || '500');
+      const effectiveLimit = Math.min(limit, maxLimit);
+
       const response = await gmail.users.messages.list({
         userId: 'me',
         q: query,
-        maxResults: limit
+        maxResults: effectiveLimit
       });
 
       const messages = response.data.messages || [];
@@ -162,12 +170,37 @@ export class GmailHandler {
         query += ` label:${folder}`;
       }
 
-      const response = await gmail.users.messages.list({
-        userId: 'me',
-        q: query
-      });
+      // Method 1: Try to get more accurate count using a large maxResults
+      // Gmail API has a limit of 500 per request, so we'll use pagination if needed
+      let totalCount = 0;
+      let pageToken: string | undefined;
+      const maxPerPage = parseInt(process.env.MAX_EMAIL_FETCH_PER_PAGE || '500');
+      
+      // Get configurable number of pages for balance of accuracy vs performance
+      const maxPages = parseInt(process.env.MAX_EMAIL_FETCH_PAGES || '2');
+      let pageCount = 0;
 
-      return response.data.resultSizeEstimate || 0;
+      do {
+        const response = await gmail.users.messages.list({
+          userId: 'me',
+          q: query,
+          maxResults: maxPerPage,
+          pageToken
+        });
+
+        const currentPageCount = response.data.messages?.length || 0;
+        totalCount += currentPageCount;
+        pageToken = response.data.nextPageToken || undefined;
+        pageCount++;
+
+        // If we got less than maxPerPage, we've reached the end
+        if (currentPageCount < maxPerPage) {
+          break;
+        }
+
+      } while (pageToken && pageCount < maxPages);
+
+      return totalCount;
     } catch (error) {
       throw new Error(`Failed to get unread count for ${accountName}: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }

@@ -5,8 +5,8 @@
  * Tests all configured Gmail and IMAP accounts
  */
 
-const dotenv = require('dotenv');
-const { MCPEmailServer } = require('./dist/index');
+import dotenv from 'dotenv';
+import { MCPEmailServer } from '../dist/index.js';
 
 // Load environment variables
 dotenv.config();
@@ -272,7 +272,14 @@ async function testConnections() {
 }
 
 // Run the tests
-if (require.main === module) {
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Check if this module is being run directly
+if (import.meta.url === `file://${process.argv[1]}`) {
   testConnections()
     .then(success => {
       process.exit(success ? 0 : 1);
@@ -283,4 +290,4 @@ if (require.main === module) {
     });
 }
 
-module.exports = { testConnections };
+export { testConnections };

@@ -1,4 +1,4 @@
-import { MCPRequest, MCPResponse } from './types';
+import { MCPRequest, MCPResponse } from './types.js';
 export declare class MCPEmailServer {
     private gmailHandler;
     private imapHandler;
@@ -20,7 +20,7 @@ export declare class MCPEmailServer {
     private handleGetImapEmailDetail;
     private handleGetImapUnreadCount;
     addImapAccount(accountName: string, host: string, port: number, secure: boolean, user: string, encryptedPassword: string): void;
-    addXServerAccount(accountName: string, domain: string, username: string, encryptedPassword: string): void;
+    addXServerAccount(accountName: string, server: string, domain: string, username: string, encryptedPassword: string): void;
     private handleListAccounts;
     private handleTestConnection;
     private handleSearchAllEmails;

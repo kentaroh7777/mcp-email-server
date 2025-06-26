@@ -1,6 +1,6 @@
-import * as Imap from 'node-imap';
-import { IMAPConfig, EmailMessage, EmailDetail, ListEmailsParams, Tool } from './types';
-import { decrypt } from './crypto';
+import Imap from 'node-imap';
+import { IMAPConfig, EmailMessage, EmailDetail, ListEmailsParams, Tool } from './types.js';
+import { decrypt } from './crypto.js';
 
 export class IMAPHandler {
   private encryptionKey: string;
@@ -39,12 +39,13 @@ export class IMAPHandler {
     
     for (const domainKey of xserverDomainKeys) {
       const accountName = domainKey.replace('XSERVER_DOMAIN_', '');
+      const server = process.env[`XSERVER_SERVER_${accountName}`];
       const domain = process.env[domainKey];
       const username = process.env[`XSERVER_USERNAME_${accountName}`];
       const password = process.env[`XSERVER_PASSWORD_${accountName}`];
       
-      if (domain && username && password) {
-        this.addXServerAccount(accountName, domain, username, password);
+      if (server && domain && username && password) {
+        this.addXServerAccount(accountName, server, domain, username, password);
       }
     }
   }
@@ -70,7 +71,7 @@ export class IMAPHandler {
         tlsOptions: { rejectUnauthorized: false }
       };
 
-      const imap = new (Imap as any)(imapConfig);
+      const imap = new Imap(imapConfig);
       
       return new Promise((resolve, reject) => {
         imap.once('ready', () => {
@@ -111,7 +112,9 @@ export class IMAPHandler {
       await this.openBox(imap, params.folder || 'INBOX');
 
       const searchCriteria = params.unread_only ? ['UNSEEN'] : ['ALL'];
-      const limit = params.limit || 20;
+      // Apply environmental limits for email content fetching
+      const maxLimit = parseInt(process.env.MAX_EMAIL_CONTENT_LIMIT || '500');
+      const limit = Math.min(params.limit || 20, maxLimit);
 
       return new Promise((resolve, reject) => {
         imap.search(searchCriteria, (err, results) => {
@@ -212,7 +215,10 @@ export class IMAPHandler {
           }
 
           const messages: EmailMessage[] = [];
-          const limitedResults = results.slice(-limit);
+          // Apply environmental limits for email content fetching
+          const maxLimit = parseInt(process.env.MAX_EMAIL_CONTENT_LIMIT || '500');
+          const effectiveLimit = Math.min(limit, maxLimit);
+          const limitedResults = results.slice(-effectiveLimit);
 
           const f = imap.fetch(limitedResults, {
             bodies: 'HEADER.FIELDS (FROM TO SUBJECT DATE)',
@@ -437,12 +443,12 @@ export class IMAPHandler {
   }
 
   // Special method for xserver domain support
-  addXServerAccount(accountName: string, domain: string, username: string, encryptedPassword: string): void {
+  addXServerAccount(accountName: string, server: string, domain: string, username: string, encryptedPassword: string): void {
     const config: IMAPConfig = {
-      host: `${domain}`, // xserver uses the domain directly as host
+      host: `${server}.xserver.jp`, // XServer uses sv****.xserver.jp format
       port: 993,
       secure: true,
-      user: username,
+      user: `${username}@${domain}`, // full email address for user
       password: encryptedPassword
     };
     

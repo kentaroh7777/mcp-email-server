@@ -1,7 +1,7 @@
 import * as readline from 'readline';
 import * as dotenv from 'dotenv';
-import { GmailHandler, gmailTools } from './gmail';
-import { IMAPHandler, imapTools } from './imap';
+import { GmailHandler, gmailTools } from './gmail.js';
+import { IMAPHandler, imapTools } from './imap.js';
 dotenv.config();
 export class MCPEmailServer {
     constructor() {
@@ -317,8 +317,8 @@ export class MCPEmailServer {
     addImapAccount(accountName, host, port, secure, user, encryptedPassword) {
         this.imapHandler.addAccount(accountName, { host, port, secure, user, password: encryptedPassword });
     }
-    addXServerAccount(accountName, domain, username, encryptedPassword) {
-        this.imapHandler.addXServerAccount(accountName, domain, username, encryptedPassword);
+    addXServerAccount(accountName, server, domain, username, encryptedPassword) {
+        this.imapHandler.addXServerAccount(accountName, server, domain, username, encryptedPassword);
     }
     // Unified methods implementation
     async handleListAccounts(_args, requestId) {
@@ -377,6 +377,16 @@ export class MCPEmailServer {
     async handleTestConnection(args, requestId) {
         try {
             const { account_name } = args;
+            if (!account_name) {
+                return {
+                    jsonrpc: '2.0',
+                    id: requestId,
+                    error: {
+                        code: -32602,
+                        message: 'Invalid params: account_name is required'
+                    }
+                };
+            }
             // Check if it's a Gmail account
             const gmailAccounts = this.gmailHandler.getAvailableAccounts();
             if (gmailAccounts.includes(account_name)) {

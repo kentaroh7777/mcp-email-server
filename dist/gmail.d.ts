@@ -1,5 +1,5 @@
 import { gmail_v1 } from 'googleapis';
-import { EmailMessage, EmailDetail, ListEmailsParams, Tool } from './types';
+import { EmailMessage, EmailDetail, ListEmailsParams, Tool } from './types.js';
 export declare class GmailHandler {
     private configs;
     constructor();

@@ -2,12 +2,16 @@
   "name": "mcp-email-server",
   "version": "1.0.0",
   "description": "MCP server for email management with Gmail and IMAP support",
+  "type": "module",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "keywords": [
     "mcp",
@@ -25,10 +29,11 @@
     "node-imap": "^0.9.6"
   },
   "devDependencies": {
-    "@types/node": "^20.10.6",
+    "@types/node": "^20.19.1",
     "@types/node-imap": "^0.9.0",
     "ts-node": "^10.9.2",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "vitest": "^3.2.4"
   },
   "engines": {
     "node": ">=18.0.0"

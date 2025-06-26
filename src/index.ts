@@ -1,6 +1,8 @@
 import * as readline from 'readline';
 import * as dotenv from 'dotenv';
-import { MCPRequest, MCPResponse, InitializeResult, Tool, EmailMessage } from './types';
+import { MCPRequest, MCPResponse, InitializeResult, Tool, EmailMessage } from './types.js';
+import { GmailHandler, gmailTools } from './gmail.js';
+import { IMAPHandler, imapTools } from './imap.js';
 
 interface UnifiedEmailSearch {
   query: string;
@@ -16,8 +18,6 @@ interface AccountStatus {
   lastChecked: string;
   errorMessage?: string;
 }
-import { GmailHandler, gmailTools } from './gmail';
-import { IMAPHandler, imapTools } from './imap';
 
 dotenv.config();
 
@@ -33,6 +33,9 @@ export class MCPEmailServer {
   }
 
   async handleRequest(request: MCPRequest): Promise<MCPResponse> {
+    // Debug: Log incoming requests
+    // console.error(`[MCP DEBUG] Incoming request: ${JSON.stringify(request, null, 2)}`);
+    
     try {
       switch (request.method) {
         case 'initialize':
@@ -323,11 +326,14 @@ export class MCPEmailServer {
   }
 
   private createResponse(id: any, result: any): MCPResponse {
-    return {
-      jsonrpc: '2.0',
+    const response: MCPResponse = {
+      jsonrpc: '2.0' as const,
       id,
       result
     };
+    // Debug: Log outgoing responses
+    // console.error(`[MCP DEBUG] Outgoing response: ${JSON.stringify(response, null, 2)}`);
+    return response;
   }
 
   private async handleListImapEmails(args: any, requestId: any): Promise<MCPResponse> {
@@ -371,8 +377,8 @@ export class MCPEmailServer {
     this.imapHandler.addAccount(accountName, { host, port, secure, user, password: encryptedPassword });
   }
 
-  addXServerAccount(accountName: string, domain: string, username: string, encryptedPassword: string): void {
-    this.imapHandler.addXServerAccount(accountName, domain, username, encryptedPassword);
+  addXServerAccount(accountName: string, server: string, domain: string, username: string, encryptedPassword: string): void {
+    this.imapHandler.addXServerAccount(accountName, server, domain, username, encryptedPassword);
   }
 
   // Unified methods implementation
@@ -433,6 +439,17 @@ export class MCPEmailServer {
   private async handleTestConnection(args: any, requestId: any): Promise<MCPResponse> {
     try {
       const { account_name } = args;
+      
+      if (!account_name) {
+        return {
+          jsonrpc: '2.0',
+          id: requestId,
+          error: {
+            code: -32602,
+            message: 'Invalid params: account_name is required'
+          }
+        };
+      }
       
       // Check if it's a Gmail account
       const gmailAccounts = this.gmailHandler.getAvailableAccounts();
@@ -634,11 +651,14 @@ const rl = readline.createInterface({
 });
 
 rl.on('line', async (line: string) => {
+          // console.error(`[MCP DEBUG] Raw input: ${line.trim()}`);
   try {
     const request = JSON.parse(line.trim());
-    const response = await server.handleRequest(request);
-    console.log(JSON.stringify(response));
+          const response = await server.handleRequest(request);
+      // console.error(`[MCP DEBUG] Sending response: ${JSON.stringify(response, null, 2)}`);
+      console.log(JSON.stringify(response));
   } catch (error) {
+          // console.error(`[MCP DEBUG] Parse error: ${error}`);
     const errorResponse = {
       jsonrpc: '2.0' as const,
       id: null,

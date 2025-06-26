@@ -1,4 +1,4 @@
-import { IMAPConfig, EmailMessage, EmailDetail, ListEmailsParams, Tool } from './types';
+import { IMAPConfig, EmailMessage, EmailDetail, ListEmailsParams, Tool } from './types.js';
 export declare class IMAPHandler {
     private encryptionKey;
     private connections;
@@ -16,6 +16,6 @@ export declare class IMAPHandler {
     private extractAttachments;
     private extractTextFromBody;
     getAvailableAccounts(): string[];
-    addXServerAccount(accountName: string, domain: string, username: string, encryptedPassword: string): void;
+    addXServerAccount(accountName: string, server: string, domain: string, username: string, encryptedPassword: string): void;
 }
 export declare const imapTools: Tool[];
