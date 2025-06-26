@@ -2,15 +2,25 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawn, ChildProcess } from 'child_process';
 import path from 'path';
 import { GmailHandler } from '../src/gmail.js';
+import { checkTestPrerequisites, getTestAccountName, getTestDateRange, getTestEnvironment } from './test-helpers.js';
 
 describe('IMAP Tools Timeout Prevention', () => {
   const serverPath = path.join(process.cwd(), 'run-email-server.ts');
   const TIMEOUT_MS = 10000; // 10秒タイムアウト
 
   let gmailHandler: GmailHandler;
+  let testEnv: ReturnType<typeof getTestEnvironment>;
 
   beforeAll(() => {
+    const { canRun, message } = checkTestPrerequisites();
+    console.log(`テスト環境チェック: ${message}`);
+    
+    if (!canRun) {
+      throw new Error(message);
+    }
+
     gmailHandler = new GmailHandler();
+    testEnv = getTestEnvironment();
   });
 
   // Test helper function to run MCP command with timeout
@@ -22,7 +32,8 @@ describe('IMAP Tools Timeout Prevention', () => {
   }> {
     return new Promise((resolve) => {
       const child = spawn('npx', ['tsx', serverPath], {
-        stdio: ['pipe', 'pipe', 'pipe']
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: { ...process.env, NODE_ENV: 'test' }
       });
 
       let stdout = '';
@@ -91,7 +102,8 @@ describe('IMAP Tools Timeout Prevention', () => {
     });
   }
 
-  it('should respond within timeout for list_imap_emails', async () => {
+  it.skipIf(!getTestAccountName('imap'))('should respond within timeout for list_imap_emails', async () => {
+    const imapAccount = getTestAccountName('imap')!;
     const command = {
       jsonrpc: '2.0',
       id: 1,
@@ -99,13 +111,20 @@ describe('IMAP Tools Timeout Prevention', () => {
       params: {
         name: 'list_imap_emails',
         arguments: {
-          account_name: 'info_h_fpo_com',
+          account_name: imapAccount,
           limit: 1
         }
       }
     };
 
     const result = await runMCPCommand(command, 5000);
+
+    // デバッグ用ログ
+    if (!result.success) {
+      console.log('list_imap_emails test failed:', result.error);
+      console.log('TimedOut:', result.timedOut);
+      console.log('Response:', result.response);
+    }
 
     expect(result.timedOut).toBe(false);
     expect(result.success).toBe(true);
@@ -117,7 +136,8 @@ describe('IMAP Tools Timeout Prevention', () => {
     expect(Array.isArray(emails.emails)).toBe(true);
   }, 10000);
 
-  it('should respond within timeout for get_imap_unread_count', async () => {
+  it.skipIf(!getTestAccountName('imap'))('should respond within timeout for get_imap_unread_count', async () => {
+    const imapAccount = getTestAccountName('imap')!;
     const command = {
       jsonrpc: '2.0',
       id: 2,
@@ -125,12 +145,19 @@ describe('IMAP Tools Timeout Prevention', () => {
       params: {
         name: 'get_imap_unread_count',
         arguments: {
-          account_name: 'info_h_fpo_com'
+          account_name: imapAccount
         }
       }
     };
 
     const result = await runMCPCommand(command, 5000);
+
+    // デバッグ用ログ
+    if (!result.success) {
+      console.log('get_imap_unread_count test failed:', result.error);
+      console.log('TimedOut:', result.timedOut);
+      console.log('Response:', result.response);
+    }
 
     expect(result.timedOut).toBe(false);
     expect(result.success).toBe(true);
@@ -157,13 +184,21 @@ describe('IMAP Tools Timeout Prevention', () => {
 
     const result = await runMCPCommand(command, 5000);
 
+    // デバッグ用ログ
+    if (!result.success) {
+      console.log('invalid account test failed:', result.error);
+      console.log('TimedOut:', result.timedOut);
+      console.log('Response:', result.response);
+    }
+
     expect(result.timedOut).toBe(false);
     expect(result.success).toBe(true);
     expect(result.response).toBeDefined();
     expect(result.response.error).toBeDefined();
   }, 10000);
 
-  it('should handle multiple accounts without timeout', async () => {
+  it.skipIf(() => getTestEnvironment().allImapAccounts.length < 2)('should handle multiple accounts without timeout', async () => {
+    const imapAccounts = testEnv.allImapAccounts;
     const commands = [
       {
         jsonrpc: '2.0',
@@ -171,7 +206,7 @@ describe('IMAP Tools Timeout Prevention', () => {
         method: 'tools/call',
         params: {
           name: 'list_imap_emails',
-          arguments: { account_name: 'kh_h_fpo_com', limit: 1 }
+          arguments: { account_name: imapAccounts[0], limit: 1 }
         }
       },
       {
@@ -180,7 +215,7 @@ describe('IMAP Tools Timeout Prevention', () => {
         method: 'tools/call',
         params: {
           name: 'get_imap_unread_count',
-          arguments: { account_name: 'worker_h_fpo_com' }
+          arguments: { account_name: imapAccounts[1] || imapAccounts[0] }
         }
       }
     ];
@@ -195,13 +230,10 @@ describe('IMAP Tools Timeout Prevention', () => {
     });
   }, 20000);
 
-  it('should search emails with date range (previous day)', async () => {
-    // Get yesterday's date in YYYY/MM/DD format
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayStr = yesterday.toISOString().split('T')[0].replace(/-/g, '/');
+  it.skipIf(!getTestAccountName('gmail'))('should search emails with date range (previous day)', async () => {
+    const { dateAfter } = getTestDateRange();
     
-    console.log(`Testing date range search for: ${yesterdayStr}`);
+    console.log(`Testing date range search for: ${dateAfter}`);
 
     const command = {
       jsonrpc: '2.0',
@@ -213,7 +245,7 @@ describe('IMAP Tools Timeout Prevention', () => {
           account_name: 'MAIN',
           query: '*',  // Search all emails
           limit: 50,
-          date_after: yesterdayStr  // 前日以降のメールを検索（beforeは指定しない）
+          date_after: dateAfter  // 前日以降のメールを検索（beforeは指定しない）
         }
       }
     };
@@ -237,7 +269,7 @@ describe('IMAP Tools Timeout Prevention', () => {
     // 前日以降のメールが存在することを確認（現実的な期待値）
     expect(searchResult.emails.length).toBeGreaterThan(0);
     
-    console.log(`前日（${yesterdayStr}）以降受信メール件数: ${searchResult.emails.length}件`);
+    console.log(`前日（${dateAfter}）以降受信メール件数: ${searchResult.emails.length}件`);
     
     // Log first few email subjects for verification
     if (searchResult.emails.length > 0) {
@@ -249,7 +281,7 @@ describe('IMAP Tools Timeout Prevention', () => {
     
     // 期間指定が正しく動作していることを確認（前日以降のメールのみ）
     const emailDates = searchResult.emails.map((email: any) => new Date(email.date));
-    const yesterdayDate = new Date(yesterdayStr);
+    const yesterdayDate = new Date(dateAfter.split(' ')[0]);
     yesterdayDate.setHours(0, 0, 0, 0);
     
     const validEmails = emailDates.filter(date => date >= yesterdayDate);

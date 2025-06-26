@@ -168,3 +168,5 @@ credentials/
 # MCP specific
 mcp-debug.log
 mcp-error.log
+
+logs/

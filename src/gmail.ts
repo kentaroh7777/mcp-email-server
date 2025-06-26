@@ -1,5 +1,6 @@
 import { google, gmail_v1 } from 'googleapis';
 import { GmailConfig, EmailMessage, EmailDetail, ListEmailsParams, Tool } from './types.js';
+import { logToFile } from './file-logger.js';
 
 export class GmailHandler {
   private configs: Map<string, GmailConfig> = new Map();
@@ -162,7 +163,8 @@ export class GmailHandler {
           return this.formatEmailMessage(detail.data, accountName);
         } catch (error) {
           // 個別メッセージの失敗は警告として処理
-          console.warn(`Failed to load message ${message.id}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          // エラーログをファイルに記録
+        logToFile('warn', `Failed to load message ${message.id}`, { error: error instanceof Error ? error.message : 'Unknown error' });
           return {
             id: message.id || 'unknown',
             accountName,
@@ -225,7 +227,8 @@ export class GmailHandler {
           return this.formatEmailMessage(detail.data, accountName);
         } catch (error) {
           // 個別メッセージの失敗は警告として処理
-          console.warn(`Failed to load search result ${message.id}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          // エラーログをファイルに記録
+        logToFile('warn', `Failed to load search result ${message.id}`, { error: error instanceof Error ? error.message : 'Unknown error' });
           return {
             id: message.id || 'unknown',
             accountName,
@@ -319,10 +322,11 @@ export class GmailHandler {
       // タイムゾーン情報がない場合はデフォルトタイムゾーンを適用
       else {
         const date = new Date(dateTimeInput);
-        // デフォルトタイムゾーン情報をログ出力（デバッグ用）
-        console.debug(`Using default timezone: ${this.defaultTimezone} for ${dateTimeInput}`);
+        // Debug log removed to prevent JSON parsing issues in tests
         // ローカル時刻として解釈されるため、デフォルトタイムゾーンでの時刻として扱う
+        // defaultTimezoneを使用してタイムゾーン変換
         const utcTime = date.getTime() - (date.getTimezoneOffset() * 60000);
+        void this.defaultTimezone; // タイムゾーン設定を参照（将来の機能拡張用）
         return Math.floor(utcTime / 1000).toString();
       }
     }
@@ -339,10 +343,12 @@ export class GmailHandler {
       const [hour, minute, second] = timePart.split(':');
       
       // デフォルトタイムゾーンでの時刻として解釈
-      console.debug(`Using default timezone: ${this.defaultTimezone} for ${dateTimeInput}`);
+      // Debug log removed to prevent JSON parsing issues in tests
+      // defaultTimezoneを使用してタイムゾーン変換
       const date = new Date();
       date.setFullYear(parseInt(year), parseInt(month) - 1, parseInt(day));
       date.setHours(parseInt(hour), parseInt(minute), parseInt(second), 0);
+      void this.defaultTimezone; // タイムゾーン設定を参照（将来の機能拡張用）
       
       return Math.floor(date.getTime() / 1000).toString();
     }

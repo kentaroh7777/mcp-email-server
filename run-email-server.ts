@@ -13,7 +13,19 @@ const envPath = join(__dirname, '.env');
 dotenv.config({ path: envPath });
 
 import { MCPEmailProtocolHandler } from './src/mcp-handler.js';
+import { setupProductionLogging, logToFile, outputMCPResponse } from './src/file-logger.js';
 import * as readline from 'readline';
+
+// 本番環境でのログ設定
+setupProductionLogging();
+
+// サーバー起動ログ（テスト環境では抑制）
+if (process.env.NODE_ENV !== 'test') {
+  logToFile('info', 'MCP Email Server starting...', { 
+    nodeEnv: process.env.NODE_ENV,
+    pid: process.pid 
+  });
+}
 
 // 暗号化キーを環境変数から取得
 const encryptionKey = process.env.EMAIL_ENCRYPTION_KEY || 'default-key';
@@ -70,7 +82,7 @@ rl.on('line', async (line: string) => {
     const response = await handler.handleRequest(request);
     
     // レスポンスをstdoutに送信
-    console.log(JSON.stringify(response));
+    outputMCPResponse(response);
   } catch (error) {
     // エラーレスポンスを送信
     const errorResponse = {
@@ -81,7 +93,7 @@ rl.on('line', async (line: string) => {
         message: 'Parse error'
       }
     };
-    console.log(JSON.stringify(errorResponse));
+    outputMCPResponse(errorResponse);
   }
 });
 
