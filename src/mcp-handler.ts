@@ -158,6 +158,19 @@ export class MCPEmailProtocolHandler {
                   },
                   required: ['account_name']
                 }
+              },
+              // EXACT COPY OF TODOIST_GET_TASKS FOR TESTING
+              {
+                name: 'todoist_get_tasks2',
+                description: 'Get tasks from Todoist',
+                inputSchema: {
+                  type: 'object',
+                  properties: {
+                    project_id: { type: 'string', description: 'Project ID to filter tasks' },
+                    filter: { type: 'string', description: 'Filter expression' },
+                    limit: { type: 'number', description: 'Maximum number of tasks to return' }
+                  }
+                }
               }
             ]
           });
@@ -280,6 +293,44 @@ export class MCPEmailProtocolHandler {
           return this.createErrorResponse(requestId, {
             code: -32602,
             message: `Account not found: ${account_name}`
+          });
+
+        // EXACT COPY OF TODOIST_GET_TASKS FOR TESTING
+        case 'todoist_get_tasks2':
+          // Mock tasks data exactly like Todoist would return
+          const mockTasks = [
+            {
+              "id": "2995104339",
+              "order": 1,
+              "content": "Buy Milk",
+              "description": "",
+              "project_id": "2203306141",
+              "section_id": null,
+              "completed": false,
+              "label_ids": [],
+              "parent_id": null,
+              "priority": 1,
+              "comment_count": 0,
+              "creator_id": "2671355",
+              "created_at": "2019-12-11T22:36:50.000000Z",
+              "due": {
+                "date": "2019-12-11",
+                "string": "today",
+                "lang": "en",
+                "is_recurring": false
+              },
+              "url": "https://todoist.com/showTask?id=2995104339"
+            }
+          ];
+          
+          // Return EXACTLY the same format as mcp-todoist
+          return this.createResponse(requestId, {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(mockTasks, null, 2)
+              }
+            ]
           });
 
         default:
