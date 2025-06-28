@@ -84,3 +84,32 @@ export interface ListEmailsParams {
     folder?: string;
     unread_only?: boolean;
 }
+export interface SendEmailParams {
+    accountName: string;
+    to: string | string[];
+    subject: string;
+    text?: string;
+    html?: string;
+    cc?: string | string[];
+    bcc?: string | string[];
+    attachments?: Array<{
+        filename: string;
+        content: Buffer | string;
+        contentType?: string;
+    }>;
+    inReplyTo?: string;
+    references?: string[];
+    replyTo?: string;
+}
+export interface SendEmailResult {
+    success: boolean;
+    messageId?: string;
+    error?: string;
+}
+export interface SMTPConfig {
+    host: string;
+    port: number;
+    secure: boolean;
+    user: string;
+    password: string;
+}

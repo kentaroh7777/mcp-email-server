@@ -1,8 +1,14 @@
-import { describe, test, expect } from 'vitest';
-import { MCPEmailProtocolHandler } from '../src/mcp-handler.js';
+import { describe, test, expect, beforeEach } from 'vitest';
+import { MCPEmailProtocolHandler } from '../../src/mcp-handler.js';
+import { TestHelper } from '../utils/helpers.js';
 
 describe('Unified Tools Tests', () => {
   const handler = new MCPEmailProtocolHandler();
+  let helper: TestHelper;
+
+  beforeEach(() => {
+    helper = new TestHelper();
+  });
 
   describe('Tools List Verification', () => {
     test('統合化されたツールが正しく定義されている', async () => {
@@ -24,6 +30,7 @@ describe('Unified Tools Tests', () => {
       expect(toolNames).toContain('search_emails');
       expect(toolNames).toContain('get_email_detail');
       expect(toolNames).toContain('archive_email');
+      expect(toolNames).toContain('send_email');
 
       // 古いIMAPツールが削除されていることを確認
       expect(toolNames).not.toContain('list_imap_emails');
@@ -40,7 +47,7 @@ describe('Unified Tools Tests', () => {
       };
 
       const response = await handler.handleRequest(request);
-      const unifiedTools = ['list_emails', 'search_emails', 'get_email_detail', 'archive_email'];
+      const unifiedTools = ['list_emails', 'search_emails', 'get_email_detail', 'archive_email', 'send_email'];
       
       for (const toolName of unifiedTools) {
         const tool = response.result.tools.find((t: any) => t.name === toolName);
@@ -52,6 +59,36 @@ describe('Unified Tools Tests', () => {
         expect(tool.inputSchema.properties.account_name).toBeDefined();
         expect(tool.inputSchema.required).toContain('account_name');
       }
+    });
+
+    test('send_emailツールに特別なスキーマが定義されている', async () => {
+      const request = {
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/list',
+        params: {}
+      };
+
+      const response = await handler.handleRequest(request);
+      const sendEmailTool = response.result.tools.find((t: any) => t.name === 'send_email');
+      
+      expect(sendEmailTool).toBeDefined();
+      expect(sendEmailTool.description).toContain('automatically detects account type');
+      
+      // 必須フィールドの確認
+      expect(sendEmailTool.inputSchema.required).toEqual(
+        expect.arrayContaining(['account_name', 'to', 'subject'])
+      );
+      
+      // toフィールドのoneOf対応確認
+      expect(sendEmailTool.inputSchema.properties.to.oneOf).toBeDefined();
+      expect(sendEmailTool.inputSchema.properties.to.oneOf).toHaveLength(2);
+      
+      // オプションフィールドの確認
+      expect(sendEmailTool.inputSchema.properties.text).toBeDefined();
+      expect(sendEmailTool.inputSchema.properties.html).toBeDefined();
+      expect(sendEmailTool.inputSchema.properties.cc).toBeDefined();
+      expect(sendEmailTool.inputSchema.properties.bcc).toBeDefined();
     });
   });
 
@@ -159,13 +196,112 @@ describe('Unified Tools Tests', () => {
       expect(response.error).toBeDefined();
       expect(response.error?.message).toContain('account_name is required');
     });
+
+    test('send_email - 必須パラメータが不足している場合のエラーハンドリング', async () => {
+      // account_name不足
+      const request1 = {
+        jsonrpc: '2.0',
+        id: 8,
+        method: 'tools/call',
+        params: {
+          name: 'send_email',
+          arguments: {
+            to: 'test@example.com',
+            subject: 'Test'
+          }
+        }
+      };
+
+      const response1 = await handler.handleRequest(request1);
+      expect(response1.error).toBeDefined();
+      expect(response1.error?.message).toContain('account_name, to, and subject are required');
+
+      // to不足
+      const request2 = {
+        jsonrpc: '2.0',
+        id: 9,
+        method: 'tools/call',
+        params: {
+          name: 'send_email',
+          arguments: {
+            account_name: 'test_account',
+            subject: 'Test'
+          }
+        }
+      };
+
+      const response2 = await handler.handleRequest(request2);
+      expect(response2.error).toBeDefined();
+      expect(response2.error?.message).toContain('account_name, to, and subject are required');
+
+      // subject不足
+      const request3 = {
+        jsonrpc: '2.0',
+        id: 10,
+        method: 'tools/call',
+        params: {
+          name: 'send_email',
+          arguments: {
+            account_name: 'test_account',
+            to: 'test@example.com'
+          }
+        }
+      };
+
+      const response3 = await handler.handleRequest(request3);
+      expect(response3.error).toBeDefined();
+      expect(response3.error?.message).toContain('account_name, to, and subject are required');
+
+      // textとhtml両方不足
+      const request4 = {
+        jsonrpc: '2.0',
+        id: 11,
+        method: 'tools/call',
+        params: {
+          name: 'send_email',
+          arguments: {
+            account_name: 'test_account',
+            to: 'test@example.com',
+            subject: 'Test'
+          }
+        }
+      };
+
+      const response4 = await handler.handleRequest(request4);
+      expect(response4.error).toBeDefined();
+      expect(response4.error?.message).toContain('Either text or html content is required');
+    });
+
+    test('send_email - 存在しないアカウントで適切なエラーを返す（実際の状態検証付き）', async () => {
+      // 実際の状態検証を使用してテストの信頼性を確保
+      const verification = await helper.verifyProtocolOnly('send_email', {
+        to: 'test@example.com',
+        subject: 'Test Email',
+        text: 'This is a test email.'
+      });
+
+      // ログ監視による安全性確認
+      expect(verification.details?.monitorResult?.safe).toBe(true);
+      expect(verification.valid).toBe(true);
+      expect(verification.expected).toBe('Proper error handling for non-existent account');
+      expect(verification.actual).toContain('Send email error handled properly');
+
+      // 従来のレスポンス形式も確認
+      const response = verification.details?.response;
+      if (response?.result?.content?.[0]?.text) {
+        const result = JSON.parse(response.result.content[0].text);
+        expect(result).toHaveProperty('success', false);
+        expect(result).toHaveProperty('error');
+        expect(result.error).toContain('SMTP configuration not found for account');
+      }
+    });
   });
 
   describe('Improved get_account_stats', () => {
     test('改良されたget_account_statsが新しい構造を返す', async () => {
       const request = {
         jsonrpc: '2.0',
-        id: 8,
+        id: 13,
         method: 'tools/call',
         params: {
           name: 'get_account_stats',
@@ -278,6 +414,68 @@ describe('Unified Tools Tests', () => {
       const response = await handler.handleRequest(request);
       expect(response.error).toBeDefined();
       expect(response.error?.code).toBe(-32600);
+    });
+  });
+
+  describe('Test Reliability Enhancement', () => {
+    test('実際の状態検証機能が動作する', async () => {
+      // プロトコルレベルテストでAPI呼び出しが発生しないことを確認
+      const verification = await helper.verifyProtocolOnly('list_emails', {
+        limit: 5
+      });
+
+      expect(verification.valid).toBe(true);
+      expect(verification.details?.monitorResult?.safe).toBe(true);
+      expect(verification.details?.monitorResult?.unexpectedCalls).toHaveLength(0);
+      expect(verification.details?.monitorResult?.suspiciousPatterns).toHaveLength(0);
+    });
+
+    test('ログ監視機能が危険なパターンを検出する', async () => {
+      // 存在しないアカウントでテストして、適切なエラーハンドリングを確認
+      const archiveVerification = await helper.verifyProtocolOnly('archive_email', {
+        email_id: 'test_dummy_id'
+      });
+
+             expect(archiveVerification.valid).toBe(true);
+       expect(archiveVerification.details?.monitorResult?.safe).toBe(true);
+       expect(archiveVerification.actual).toContain('Archive email errors handled properly');
+       
+       const getDetailVerification = await helper.verifyProtocolOnly('get_email_detail', {
+         email_id: 'test_dummy_id'
+       });
+
+       expect(getDetailVerification.valid).toBe(true);
+       expect(getDetailVerification.details?.monitorResult?.safe).toBe(true);
+       expect(getDetailVerification.actual).toContain('Appropriate error response');
+    });
+
+    test('偽成功テスト防止機能が動作する', async () => {
+      // 複数のツールでプロトコルテストを実行し、全て安全であることを確認
+      const tools = ['list_emails', 'search_emails', 'get_email_detail', 'archive_email', 'send_email'];
+      
+             for (const toolName of tools) {
+         const verification = await helper.verifyProtocolOnly(toolName, {
+           email_id: 'dummy_test_id',
+           query: 'test',
+           to: 'test@example.com',
+           subject: 'Test',
+           text: 'Test content'
+         });
+
+         expect(verification.valid).toBe(true);
+         expect(verification.details?.monitorResult?.safe).toBe(true);
+         expect(verification.details?.monitorResult?.unexpectedCalls).toHaveLength(0);
+         expect(verification.details?.monitorResult?.suspiciousPatterns).toHaveLength(0);
+         
+         // ツール別の適切なエラーハンドリングを確認
+         if (toolName === 'send_email') {
+           expect(verification.actual).toContain('Send email error handled properly');
+         } else if (toolName === 'archive_email') {
+           expect(verification.actual).toContain('Archive email errors handled properly');
+         } else {
+           expect(verification.actual).toContain('Appropriate error response');
+         }
+       }
     });
   });
 }); 

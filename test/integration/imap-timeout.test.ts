@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawn, ChildProcess } from 'child_process';
 import path from 'path';
-import { GmailHandler } from '../src/gmail.js';
-import { checkTestPrerequisites, getTestAccountName, getTestDateRange, getTestEnvironment } from './test-helpers.js';
+import { GmailHandler } from '../../src/gmail.js';
+import { checkTestPrerequisites, getTestAccountName, getTestDateRange, getTestEnvironment } from '../utils/helpers.js';
 
 describe('IMAP Tools Timeout Prevention', () => {
   const serverPath = path.join(process.cwd(), 'run-email-server.ts');

@@ -1,13 +1,16 @@
-import { IMAPConfig, EmailMessage, EmailDetail, ListEmailsParams, Tool } from './types.js';
+import { IMAPConfig, EmailMessage, EmailDetail, ListEmailsParams, Tool, SendEmailParams, SendEmailResult } from './types.js';
 export declare class IMAPHandler {
     private encryptionKey;
     private connections;
     private connectionPool;
+    private smtpConfigs;
     private readonly DEFAULT_TIMEOUT;
     private readonly connectionTimeout;
     private readonly operationTimeout;
     constructor(encryptionKey?: string);
     private loadIMAPConfigs;
+    private loadSMTPConfig;
+    private loadXServerSMTPConfig;
     addAccount(accountName: string, config: IMAPConfig): void;
     private getConnection;
     private createConnection;
@@ -23,5 +26,6 @@ export declare class IMAPHandler {
     archiveEmail(accountName: string, emailId: string, removeUnread?: boolean): Promise<boolean>;
     getAvailableAccounts(): string[];
     addXServerAccount(accountName: string, server: string, domain: string, username: string, encryptedPassword: string): void;
+    sendEmail(accountName: string, params: SendEmailParams): Promise<SendEmailResult>;
 }
 export declare const imapTools: Tool[];

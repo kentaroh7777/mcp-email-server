@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { IMAPHandler } from '../src/imap.js';
-import { checkTestPrerequisites, getTestAccountName } from './test-helpers.js';
+import { IMAPHandler } from '../../src/imap.js';
+import { checkTestPrerequisites, getTestAccountName } from '../utils/helpers.js';
 
 describe('Simple IMAP Handler Test', () => {
   beforeAll(() => {

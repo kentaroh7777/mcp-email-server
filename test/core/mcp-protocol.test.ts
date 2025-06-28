@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { MCPEmailProtocolHandler } from '../src/mcp-handler.js';
-import type { MCPRequest, MCPResponse } from '../src/types.js';
+import { MCPEmailProtocolHandler } from '../../src/mcp-handler.js';
+import type { MCPRequest, MCPResponse } from '../../src/types.js';
 
 describe('MCPEmailProtocolHandler', () => {
   let handler: MCPEmailProtocolHandler;
@@ -59,6 +59,7 @@ describe('MCPEmailProtocolHandler', () => {
       expect(toolNames).toContain('search_emails'); // 統合済み: Gmail + IMAP
       expect(toolNames).toContain('get_email_detail'); // 統合済み: Gmail + IMAP
       expect(toolNames).toContain('archive_email'); // 統合済み: Gmail + IMAP
+      expect(toolNames).toContain('send_email'); // 統合済み: Gmail + IMAP
       expect(toolNames).toContain('list_accounts');
       expect(toolNames).toContain('test_connection');
       expect(toolNames).toContain('get_account_stats'); // 改良済み: アカウントタイプ情報付き
@@ -381,10 +382,85 @@ describe('MCPEmailProtocolHandler', () => {
       });
     });
 
-    it('should handle improved get_account_stats tool', async () => {
+    it('should handle unified send_email tool (basic validation)', async () => {
       const request: MCPRequest = {
         jsonrpc: '2.0',
         id: 13,
+        method: 'tools/call',
+        params: {
+          name: 'send_email',
+          arguments: {
+            account_name: 'test_account',
+            to: 'test@example.com',
+            subject: 'Test Email',
+            text: 'This is a test email message.'
+          }
+        }
+      };
+
+      const response = await handler.handleRequest(request);
+
+      expect(response.jsonrpc).toBe('2.0');
+      expect(response.id).toBe(13);
+      
+      // アカウントが存在しない場合の適切なレスポンス確認
+      const data = response.result.content?.[0]?.text ? JSON.parse(response.result.content[0].text) : null;
+      expect(data).toBeDefined();
+      expect(data).toHaveProperty('success', false);
+      expect(data).toHaveProperty('error');
+      expect(data.error).toContain('SMTP configuration not found for account: test_account');
+    });
+
+    it('should handle send_email with missing required parameters', async () => {
+      const request: MCPRequest = {
+        jsonrpc: '2.0',
+        id: 14,
+        method: 'tools/call',
+        params: {
+          name: 'send_email',
+          arguments: {
+            account_name: 'test_account'
+            // 必須パラメータ（to, subject）が不足
+          }
+        }
+      };
+
+      const response = await handler.handleRequest(request);
+
+      expect(response.error).toMatchObject({
+        code: -32602,
+        message: 'account_name, to, and subject are required'
+      });
+    });
+
+    it('should handle send_email with missing content', async () => {
+      const request: MCPRequest = {
+        jsonrpc: '2.0',
+        id: 15,
+        method: 'tools/call',
+        params: {
+          name: 'send_email',
+          arguments: {
+            account_name: 'test_account',
+            to: 'test@example.com',
+            subject: 'Test Email'
+            // textまたはhtmlが不足
+          }
+        }
+      };
+
+      const response = await handler.handleRequest(request);
+
+      expect(response.error).toMatchObject({
+        code: -32602,
+        message: 'Either text or html content is required'
+      });
+    });
+
+    it('should handle improved get_account_stats tool', async () => {
+      const request: MCPRequest = {
+        jsonrpc: '2.0',
+        id: 16,
         method: 'tools/call',
         params: {
           name: 'get_account_stats',
@@ -395,7 +471,7 @@ describe('MCPEmailProtocolHandler', () => {
       const response = await handler.handleRequest(request);
 
       expect(response.jsonrpc).toBe('2.0');
-      expect(response.id).toBe(13);
+      expect(response.id).toBe(16);
       
       // 改良されたレスポンス構造を確認
       const data = response.result.content?.[0]?.text ? JSON.parse(response.result.content[0].text) : null;
@@ -414,7 +490,7 @@ describe('MCPEmailProtocolHandler', () => {
     it('should always return valid MCPResponse format', async () => {
       const request: MCPRequest = {
         jsonrpc: '2.0',
-        id: 14,
+        id: 17,
         method: 'initialize',
         params: {}
       };
@@ -422,7 +498,7 @@ describe('MCPEmailProtocolHandler', () => {
       const response = await handler.handleRequest(request);
 
       expect(response).toHaveProperty('jsonrpc', '2.0');
-      expect(response).toHaveProperty('id', 14);
+      expect(response).toHaveProperty('id', 17);
       expect(response).toSatisfy((res: MCPResponse) => {
         return res.result !== undefined || res.error !== undefined;
       });

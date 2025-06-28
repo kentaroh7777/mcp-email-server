@@ -1,5 +1,5 @@
 import { gmail_v1 } from 'googleapis';
-import { EmailMessage, EmailDetail, ListEmailsParams, Tool } from './types.js';
+import { EmailMessage, EmailDetail, ListEmailsParams, Tool, SendEmailParams, SendEmailResult } from './types.js';
 export declare class GmailHandler {
     private configs;
     private readonly DEFAULT_TIMEOUT;
@@ -20,5 +20,7 @@ export declare class GmailHandler {
     private extractEmailBody;
     private extractAttachments;
     archiveEmail(accountName: string, emailId: string, removeUnread?: boolean): Promise<boolean>;
+    sendEmail(accountName: string, params: SendEmailParams): Promise<SendEmailResult>;
+    private buildEmailMessage;
 }
 export declare const gmailTools: Tool[];

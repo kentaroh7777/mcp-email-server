@@ -427,20 +427,120 @@ export class GmailHandler {
                     addLabelIds: ['CATEGORY_PERSONAL']
                 }
             });
-            console.log(`[DEBUG] CATEGORY_PERSONAL追加完了`);
-            // デバッグ: アーカイブ後のメール状態を確認
+            console.log(`[DEBUG] アーカイブ処理完了`);
+            // Step 5: 結果確認（デバッグ用）
             const afterModify = await gmail.users.messages.get({
                 userId: 'me',
                 id: emailId,
                 format: 'minimal'
             });
-            console.log(`[DEBUG] アーカイブ後のラベル: ${afterModify.data.labelIds?.join(', ')}`);
-            console.log(`[DEBUG] Gmail API レスポンス完了`);
+            const afterLabels = afterModify.data.labelIds || [];
+            console.log(`[DEBUG] アーカイブ後のラベル: ${afterLabels.join(', ')}`);
             return true;
         }
         catch (error) {
-            console.log(`[DEBUG] Archive error:`, error);
-            throw new Error(`Failed to archive email for ${accountName}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            console.error(`[ERROR] アーカイブ失敗:`, error);
+            throw new Error(`Gmail archive failed for ${accountName}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+    }
+    async sendEmail(accountName, params) {
+        try {
+            const gmail = await this.authenticate(accountName);
+            // メール内容の構築
+            const email = this.buildEmailMessage(params);
+            // Base64URLエンコード
+            const encodedEmail = Buffer.from(email).toString('base64url');
+            // Gmail API経由でメール送信
+            const response = await gmail.users.messages.send({
+                userId: 'me',
+                requestBody: {
+                    raw: encodedEmail
+                }
+            });
+            logToFile('info', `Email sent successfully via Gmail`, {
+                accountName,
+                messageId: response.data.id,
+                to: Array.isArray(params.to) ? params.to : [params.to],
+                subject: params.subject
+            });
+            return {
+                success: true,
+                messageId: response.data.id || undefined
+            };
+        }
+        catch (error) {
+            const errorMessage = `Gmail send failed for ${accountName}: ${error instanceof Error ? error.message : 'Unknown error'}`;
+            logToFile('error', errorMessage, { error });
+            return {
+                success: false,
+                error: errorMessage
+            };
+        }
+    }
+    buildEmailMessage(params) {
+        const { to, subject, text, html, cc, bcc, inReplyTo, references, replyTo } = params;
+        // ヘッダーの構築
+        const headers = [];
+        // TO
+        const toAddresses = Array.isArray(to) ? to.join(', ') : to;
+        headers.push(`To: ${toAddresses}`);
+        // CC
+        if (cc) {
+            const ccAddresses = Array.isArray(cc) ? cc.join(', ') : cc;
+            headers.push(`Cc: ${ccAddresses}`);
+        }
+        // BCC
+        if (bcc) {
+            const bccAddresses = Array.isArray(bcc) ? bcc.join(', ') : bcc;
+            headers.push(`Bcc: ${bccAddresses}`);
+        }
+        // Reply-To
+        if (replyTo) {
+            headers.push(`Reply-To: ${replyTo}`);
+        }
+        // Subject
+        headers.push(`Subject: ${subject}`);
+        // 返信ヘッダー
+        if (inReplyTo) {
+            headers.push(`In-Reply-To: ${inReplyTo}`);
+        }
+        if (references && references.length > 0) {
+            headers.push(`References: ${references.join(' ')}`);
+        }
+        // Content-Type
+        if (html && text) {
+            // マルチパート（HTML + テキスト）
+            const boundary = `boundary_${Date.now()}_${Math.random().toString(36)}`;
+            headers.push(`Content-Type: multipart/alternative; boundary="${boundary}"`);
+            headers.push('MIME-Version: 1.0');
+            const body = [
+                `--${boundary}`,
+                'Content-Type: text/plain; charset=UTF-8',
+                'Content-Transfer-Encoding: 7bit',
+                '',
+                text,
+                '',
+                `--${boundary}`,
+                'Content-Type: text/html; charset=UTF-8',
+                'Content-Transfer-Encoding: 7bit',
+                '',
+                html,
+                '',
+                `--${boundary}--`
+            ].join('\r\n');
+            return headers.join('\r\n') + '\r\n\r\n' + body;
+        }
+        else if (html) {
+            // HTMLのみ
+            headers.push('Content-Type: text/html; charset=UTF-8');
+            headers.push('MIME-Version: 1.0');
+            return headers.join('\r\n') + '\r\n\r\n' + html;
+        }
+        else {
+            // テキストのみ
+            headers.push('Content-Type: text/plain; charset=UTF-8');
+            headers.push('MIME-Version: 1.0');
+            return headers.join('\r\n') + '\r\n\r\n' + (text || '');
         }
     }
 }

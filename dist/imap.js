@@ -1,9 +1,11 @@
 import Imap from 'node-imap';
+import nodemailer from 'nodemailer';
 import { decrypt } from './crypto.js';
 export class IMAPHandler {
     constructor(encryptionKey = process.env.EMAIL_ENCRYPTION_KEY || 'default-key') {
         this.connections = new Map();
         this.connectionPool = new Map();
+        this.smtpConfigs = new Map();
         // 環境変数によるタイムアウト設定（デフォルト60秒）
         this.DEFAULT_TIMEOUT = 60000;
         this.encryptionKey = encryptionKey;
@@ -30,6 +32,8 @@ export class IMAPHandler {
                     user,
                     password
                 });
+                // SMTP設定も同時に読み込み
+                this.loadSMTPConfig(accountName);
             }
         }
         // Load XServer accounts
@@ -42,8 +46,53 @@ export class IMAPHandler {
             const password = process.env[`XSERVER_PASSWORD_${accountName}`];
             if (server && domain && username && password) {
                 this.addXServerAccount(accountName, server, domain, username, password);
+                // XServer用のSMTP設定を読み込み
+                this.loadXServerSMTPConfig(accountName, server, username, password);
             }
         }
+    }
+    loadSMTPConfig(accountName) {
+        // SMTP設定を環境変数から読み込み
+        const smtpHost = process.env[`SMTP_HOST_${accountName}`];
+        const smtpPort = parseInt(process.env[`SMTP_PORT_${accountName}`] || '587');
+        const smtpSecure = process.env[`SMTP_SECURE_${accountName}`] === 'true';
+        const smtpUser = process.env[`SMTP_USER_${accountName}`];
+        const smtpPassword = process.env[`SMTP_PASSWORD_${accountName}`];
+        if (smtpHost && smtpUser && smtpPassword) {
+            this.smtpConfigs.set(accountName, {
+                host: smtpHost,
+                port: smtpPort,
+                secure: smtpSecure,
+                user: smtpUser,
+                password: smtpPassword
+            });
+        }
+        else {
+            // SMTP設定がない場合はIMAPと同じホストを推測
+            const imapConnection = this.connections.get(accountName);
+            if (imapConnection) {
+                const smtpHost = imapConnection.config.host.replace('imap', 'smtp');
+                this.smtpConfigs.set(accountName, {
+                    host: smtpHost,
+                    port: 587,
+                    secure: false,
+                    user: imapConnection.config.user,
+                    password: imapConnection.config.password
+                });
+            }
+        }
+    }
+    loadXServerSMTPConfig(accountName, server, username, password) {
+        // XServer用のSMTP設定 - ホスト名とユーザー名を正しい形式に修正
+        const connection = this.connections.get(accountName);
+        const domain = connection?.config.user.split('@')[1] || 'h-fpo.com';
+        this.smtpConfigs.set(accountName, {
+            host: `${server}.xserver.jp`, // 完全なホスト名
+            port: 587,
+            secure: false,
+            user: `${username}@${domain}`, // 完全なメールアドレス
+            password: password
+        });
     }
     addAccount(accountName, config) {
         this.connections.set(accountName, { config });
@@ -136,12 +185,12 @@ export class IMAPHandler {
             throw new Error(`Failed to decrypt password or connect: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
     }
-    async openBox(imap, boxName = 'INBOX') {
+    async openBox(imap, boxName = 'INBOX', readOnly = true) {
         return new Promise((resolve, reject) => {
             const timeout = setTimeout(() => {
                 reject(new Error(`Mailbox open timeout for ${boxName} after ${this.operationTimeout}ms`));
             }, this.operationTimeout);
-            imap.openBox(boxName, true, (err) => {
+            imap.openBox(boxName, readOnly, (err) => {
                 clearTimeout(timeout);
                 if (err) {
                     reject(new Error(`Failed to open mailbox ${boxName}: ${err.message}`));
@@ -487,7 +536,7 @@ export class IMAPHandler {
         let imap = null;
         try {
             imap = await this.getConnection(accountName);
-            await this.openBox(imap, 'INBOX');
+            await this.openBox(imap, 'INBOX', false); // 読み書きモードでオープン
             return new Promise((resolve, reject) => {
                 let resolved = false;
                 const timeout = setTimeout(() => {
@@ -501,77 +550,27 @@ export class IMAPHandler {
                     // Instead, we'll move the email to a "Sent" or "Archive" folder if it exists
                     // or mark it as deleted
                     const uid = parseInt(emailId);
-                    // Try to move to Archive folder first
-                    const tryMoveToArchive = () => {
-                        imap.move(uid, 'Archive', (err) => {
-                            if (err) {
-                                // If Archive folder doesn't exist, try other common archive folder names
-                                imap.move(uid, 'Sent', (err2) => {
-                                    if (err2) {
-                                        // If no archive folder exists, mark as deleted
-                                        let flags = ['\\Deleted'];
-                                        if (removeUnread) {
-                                            flags.push('\\Seen');
-                                        }
-                                        imap.addFlags(uid, flags, (err3) => {
-                                            clearTimeout(timeout);
-                                            if (err3) {
-                                                if (!resolved) {
-                                                    resolved = true;
-                                                    reject(new Error(`Failed to mark email as deleted: ${err3.message}`));
-                                                }
-                                            }
-                                            else {
-                                                if (!resolved) {
-                                                    resolved = true;
-                                                    resolve(true);
-                                                }
-                                            }
-                                        });
-                                    }
-                                    else {
-                                        // Successfully moved to Sent folder
-                                        if (removeUnread) {
-                                            imap.addFlags(uid, ['\\Seen'], (_err3) => {
-                                                clearTimeout(timeout);
-                                                if (!resolved) {
-                                                    resolved = true;
-                                                    resolve(true);
-                                                }
-                                            });
-                                        }
-                                        else {
-                                            clearTimeout(timeout);
-                                            if (!resolved) {
-                                                resolved = true;
-                                                resolve(true);
-                                            }
-                                        }
-                                    }
-                                });
+                    // XServerのIMAPサーバーではmove操作が不安定なため、削除フラグのみを使用
+                    // これは一般的なアーカイブ手法で、多くのメールクライアントで使用されています
+                    let flags = ['\\Deleted'];
+                    if (removeUnread) {
+                        flags.push('\\Seen');
+                    }
+                    imap.addFlags(uid, flags, (err) => {
+                        clearTimeout(timeout);
+                        if (err) {
+                            if (!resolved) {
+                                resolved = true;
+                                reject(new Error(`Failed to archive email (mark as deleted): ${err.message}`));
                             }
-                            else {
-                                // Successfully moved to Archive folder
-                                if (removeUnread) {
-                                    imap.addFlags(uid, ['\\Seen'], (_err3) => {
-                                        clearTimeout(timeout);
-                                        if (!resolved) {
-                                            resolved = true;
-                                            resolve(true);
-                                        }
-                                    });
-                                }
-                                else {
-                                    clearTimeout(timeout);
-                                    if (!resolved) {
-                                        resolved = true;
-                                        resolve(true);
-                                    }
-                                }
+                        }
+                        else {
+                            if (!resolved) {
+                                resolved = true;
+                                resolve(true);
                             }
-                        });
-                    };
-                    tryMoveToArchive();
+                        }
+                    });
                 }
                 catch (error) {
                     clearTimeout(timeout);
@@ -611,6 +610,69 @@ export class IMAPHandler {
             password: encryptedPassword
         };
         this.addAccount(accountName, config);
+    }
+    async sendEmail(accountName, params) {
+        try {
+            const smtpConfig = this.smtpConfigs.get(accountName);
+            if (!smtpConfig) {
+                return {
+                    success: false,
+                    error: `SMTP configuration not found for account: ${accountName}`
+                };
+            }
+            // パスワードの復号
+            const decryptedPassword = decrypt(smtpConfig.password, this.encryptionKey);
+            // nodemailerのトランスポーターを作成
+            const transporter = nodemailer.createTransport({
+                host: smtpConfig.host,
+                port: smtpConfig.port,
+                secure: smtpConfig.secure,
+                auth: {
+                    user: smtpConfig.user,
+                    pass: decryptedPassword
+                },
+                connectionTimeout: this.connectionTimeout,
+                greetingTimeout: this.operationTimeout,
+                socketTimeout: this.operationTimeout
+            });
+            // メール送信オプションの構築
+            const mailOptions = {
+                from: smtpConfig.user,
+                to: Array.isArray(params.to) ? params.to.join(', ') : params.to,
+                subject: params.subject,
+                text: params.text,
+                html: params.html,
+                cc: params.cc ? (Array.isArray(params.cc) ? params.cc.join(', ') : params.cc) : undefined,
+                bcc: params.bcc ? (Array.isArray(params.bcc) ? params.bcc.join(', ') : params.bcc) : undefined,
+                attachments: params.attachments?.map(att => ({
+                    filename: att.filename,
+                    content: att.content,
+                    contentType: att.contentType
+                }))
+            };
+            // 返信ヘッダーの追加
+            if (params.replyTo) {
+                mailOptions.replyTo = params.replyTo;
+            }
+            if (params.inReplyTo) {
+                mailOptions.inReplyTo = params.inReplyTo;
+            }
+            if (params.references && params.references.length > 0) {
+                mailOptions.references = params.references;
+            }
+            // メール送信
+            const info = await transporter.sendMail(mailOptions);
+            return {
+                success: true,
+                messageId: info.messageId
+            };
+        }
+        catch (error) {
+            return {
+                success: false,
+                error: `SMTP send failed for ${accountName}: ${error instanceof Error ? error.message : 'Unknown error'}`
+            };
+        }
     }
 }
 export const imapTools = [

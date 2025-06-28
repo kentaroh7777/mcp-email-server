@@ -89,3 +89,36 @@ export interface ListEmailsParams {
   folder?: string;
   unread_only?: boolean;
 }
+
+export interface SendEmailParams {
+  accountName: string;
+  to: string | string[];
+  subject: string;
+  text?: string;
+  html?: string;
+  cc?: string | string[];
+  bcc?: string | string[];
+  attachments?: Array<{
+    filename: string;
+    content: Buffer | string;
+    contentType?: string;
+  }>;
+  // 返信機能用
+  inReplyTo?: string;      // 返信元メールのMessage-ID
+  references?: string[];   // 会話スレッドのMessage-IDリスト
+  replyTo?: string;        // Reply-Toヘッダー
+}
+
+export interface SendEmailResult {
+  success: boolean;
+  messageId?: string;
+  error?: string;
+}
+
+export interface SMTPConfig {
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  password: string;
+}

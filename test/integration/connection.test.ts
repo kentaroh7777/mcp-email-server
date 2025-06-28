@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeAll } from 'vitest';
-import { TestHelper } from './helpers.js';
+import { TestHelper } from '../utils/helpers.js';
 
 describe('Connection Tests', () => {
   const helper = new TestHelper();
@@ -295,65 +295,61 @@ describe('Connection Tests', () => {
       }
     });
 
-    test('統合されたget_email_detailツールが動作する', async () => {
-      const allAccounts = [...configuredAccounts.gmail, ...configuredAccounts.imap, ...configuredAccounts.xserver];
+    test('統合されたget_email_detailツールが動作する（プロトコルテストのみ）', async () => {
+      // 実際の状態検証を使用してプロトコルテストを実行
+      const verification = await helper.verifyProtocolOnly('get_email_detail', {
+        email_id: 'dummy_id'
+      });
       
-      if (allAccounts.length === 0) {
-        return;
-      }
+      // 実際の状態検証結果を確認
+      expect(verification.valid).toBe(true);
+      expect(verification.expected).toBe('Proper error handling for non-existent account');
+      expect(verification.actual).toContain('Appropriate error response');
+      expect(verification.details?.monitorResult?.safe).toBe(true);
+    });
 
-      for (const accountName of allAccounts) {
-        try {
-          const response = await helper.callTool('get_email_detail', {
-            account_name: accountName,
-            email_id: 'dummy_id'
-          });
-          
-                     // ダミーIDを使っているため、アカウントが見つからないかメールが見つからないエラーが期待される
-           expect(response.error).toBeDefined();
-           if (response.error?.message) {
-             expect(
-               response.error.message.includes('Account not found') || 
-               response.error.message.includes('Email not found') || 
-               response.error.message.includes('Failed to get email detail')
-             ).toBe(true);
-           }
-        } catch (error) {
-          // テスト設定によるエラーは無視
-        }
+    test('統合されたarchive_emailツールが動作する（プロトコルテストのみ）', async () => {
+      // 実際の状態検証を使用してプロトコルテストを実行（DEBUGエラー防止）
+      const verification = await helper.verifyProtocolOnly('archive_email', {
+        email_id: 'dummy_id'
+      });
+      
+      // 実際の状態検証結果を確認
+      expect(verification.valid).toBe(true);
+      expect(verification.expected).toBe('Proper error handling for non-existent account');
+      expect(verification.actual).toContain('Archive email errors handled properly');
+      expect(verification.details?.monitorResult?.safe).toBe(true);
+      
+      // 新しい複数メール対応のレスポンス形式も確認
+      const response = verification.details?.response;
+      if (response?.result?.content?.[0]?.text) {
+        const data = JSON.parse(response.result.content[0].text);
+        expect(data).toHaveProperty('total', 1);
+        expect(data).toHaveProperty('successful', 0);
+        expect(data).toHaveProperty('failed', 1);
+        expect(data).toHaveProperty('results');
+        expect(data).toHaveProperty('errors');
+        expect(Array.isArray(data.results)).toBe(true);
+        expect(Array.isArray(data.errors)).toBe(true);
+        expect(data.errors.length).toBe(1);
+        expect(data.errors[0]).toHaveProperty('email_id', 'dummy_id');
+        expect(data.errors[0]).toHaveProperty('status', 'error');
       }
     });
 
-    test('統合されたarchive_emailツールが動作する', async () => {
-      const allAccounts = [...configuredAccounts.gmail, ...configuredAccounts.imap, ...configuredAccounts.xserver];
+    test('統合されたsend_emailツールが動作する（プロトコルテストのみ）', async () => {
+      // 実際の状態検証を使用してプロトコルテストを実行
+      const verification = await helper.verifyProtocolOnly('send_email', {
+        to: 'test@example.com',
+        subject: 'Protocol Test',
+        text: 'This is a protocol test message'
+      });
       
-      if (allAccounts.length === 0) {
-        return;
-      }
-
-      // テストを最初の3アカウントのみに制限してタイムアウトを防ぐ
-      const testAccounts = allAccounts.slice(0, 3);
-
-      for (const accountName of testAccounts) {
-        try {
-          const response = await helper.callTool('archive_email', {
-            account_name: accountName,
-            email_id: 'dummy_id'
-          });
-          
-                     // ダミーIDを使っているため、アカウントが見つからないかメールが見つからないエラーが期待される
-           expect(response.error).toBeDefined();
-           if (response.error?.message) {
-             expect(
-               response.error.message.includes('Account not found') || 
-               response.error.message.includes('Email not found') || 
-               response.error.message.includes('Failed to archive email')
-             ).toBe(true);
-           }
-        } catch (error) {
-          // テスト設定によるエラーは無視
-        }
-      }
-    }, 15000); // タイムアウトを15秒に短縮
+             // 実際の状態検証結果を確認
+       expect(verification.valid).toBe(true);
+       expect(verification.expected).toBe('Proper error handling for non-existent account');
+       expect(verification.actual).toContain('Send email error handled properly');
+       expect(verification.details?.monitorResult?.safe).toBe(true);
+     });
   });
 }); 

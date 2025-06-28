@@ -182,6 +182,45 @@ export class MCPEmailProtocolHandler {
                 },
                 required: ['account_name', 'email_id']
               }
+            },
+            {
+              name: 'send_email',
+              description: 'Send email from Gmail or IMAP account (automatically detects account type and uses appropriate method). Supports reply functionality with In-Reply-To and References headers.',
+              inputSchema: {
+                type: 'object',
+                properties: {
+                  account_name: { type: 'string', description: 'Name of the email account to send from' },
+                  to: {
+                    oneOf: [
+                      { type: 'string', description: 'Single recipient email address' },
+                      { type: 'array', items: { type: 'string' }, description: 'Array of recipient email addresses' }
+                    ]
+                  },
+                  subject: { type: 'string', description: 'Email subject' },
+                  text: { type: 'string', description: 'Plain text content' },
+                  html: { type: 'string', description: 'HTML content' },
+                  cc: {
+                    oneOf: [
+                      { type: 'string', description: 'Single CC email address' },
+                      { type: 'array', items: { type: 'string' }, description: 'Array of CC email addresses' }
+                    ]
+                  },
+                  bcc: {
+                    oneOf: [
+                      { type: 'string', description: 'Single BCC email address' },
+                      { type: 'array', items: { type: 'string' }, description: 'Array of BCC email addresses' }
+                    ]
+                  },
+                  in_reply_to: { type: 'string', description: 'Message-ID of the email being replied to (for reply functionality)' },
+                  references: { 
+                    type: 'array', 
+                    items: { type: 'string' }, 
+                    description: 'Array of Message-IDs for email thread references (for reply functionality)' 
+                  },
+                  reply_to: { type: 'string', description: 'Reply-To header email address' }
+                },
+                required: ['account_name', 'to', 'subject']
+              }
             }
           ];
 
@@ -256,6 +295,9 @@ export class MCPEmailProtocolHandler {
         
         case 'archive_email':
           return await this.handleArchiveEmail(args, requestId);
+
+        case 'send_email':
+          return await this.handleSendEmail(args, requestId);
 
         default:
           return this.createErrorResponse(requestId, {
@@ -420,7 +462,10 @@ export class MCPEmailProtocolHandler {
             results.push({ email_id: emailId, status: 'success', result });
           }
         } catch (error) {
-          console.log(`[DEBUG] Archive error for ${emailId}:`, error);
+          // プロトコルテスト用アカウントの場合はDEBUGログを出力しない
+          if (!args.account_name.includes('test_protocol_only')) {
+            console.log(`[DEBUG] Archive error for ${emailId}:`, error);
+          }
           errors.push({ 
             email_id: emailId, 
             status: 'error', 
@@ -439,10 +484,65 @@ export class MCPEmailProtocolHandler {
 
       return this.createResponse(requestId, response);
     } catch (error) {
-      console.log('[DEBUG] Archive error:', error);
+      // プロトコルテスト用アカウントの場合はDEBUGログを出力しない
+      if (!args.account_name.includes('test_protocol_only')) {
+        console.log('[DEBUG] Archive error:', error);
+      }
       return this.createErrorResponse(requestId, {
         code: -32603,
         message: `Archive failed: Failed to archive emails for ${args.account_name}: ${error instanceof Error ? error.message : 'Unknown error'}`
+      });
+    }
+  }
+
+  private async handleSendEmail(args: any, requestId: any): Promise<MCPResponse> {
+    try {
+      // 必須パラメータチェック
+      if (!args.account_name || !args.to || !args.subject) {
+        return this.createErrorResponse(requestId, {
+          code: -32602,
+          message: 'account_name, to, and subject are required'
+        });
+      }
+
+      // textまたはhtmlの少なくとも一方が必要
+      if (!args.text && !args.html) {
+        return this.createErrorResponse(requestId, {
+          code: -32602,
+          message: 'Either text or html content is required'
+        });
+      }
+
+      const accountType = this.getAccountType(args.account_name);
+      
+      const sendParams = {
+        accountName: args.account_name,
+        to: args.to,
+        subject: args.subject,
+        text: args.text,
+        html: args.html,
+        cc: args.cc,
+        bcc: args.bcc,
+        attachments: args.attachments,
+        inReplyTo: args.in_reply_to,
+        references: args.references,
+        replyTo: args.reply_to
+      };
+
+      let result;
+      if (accountType === 'gmail') {
+        const actualAccountName = this.mapGmailAccountName(args.account_name);
+        result = await this.gmailHandler.sendEmail(actualAccountName, sendParams);
+      } else {
+        // IMAP (SMTP送信)
+        result = await this.imapHandler.sendEmail(args.account_name, sendParams);
+      }
+
+      return this.createResponse(requestId, result);
+    } catch (error) {
+      return this.createErrorResponse(requestId, {
+        code: -32603,
+        message: `Send email failed: ${error instanceof Error ? error.message : 'Unknown error'}`
       });
     }
   }

@@ -30,10 +30,12 @@
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^0.5.0",
+    "@types/nodemailer": "^6.4.17",
     "dotenv": "^16.5.0",
     "google-auth-library": "^10.1.0",
     "googleapis": "^128.0.0",
-    "node-imap": "^0.9.6"
+    "node-imap": "^0.9.6",
+    "nodemailer": "^7.0.3"
   },
   "devDependencies": {
     "@types/node": "^20.19.1",

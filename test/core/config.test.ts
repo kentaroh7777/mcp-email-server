@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { TestHelper } from './helpers.js';
+import { TestHelper } from '../utils/helpers.js';
 
 describe('Configuration Tests', () => {
   const helper = new TestHelper();

@@ -1,11 +1,13 @@
 import Imap from 'node-imap';
-import { IMAPConfig, EmailMessage, EmailDetail, ListEmailsParams, Tool } from './types.js';
+import nodemailer from 'nodemailer';
+import { IMAPConfig, EmailMessage, EmailDetail, ListEmailsParams, Tool, SendEmailParams, SendEmailResult, SMTPConfig } from './types.js';
 import { decrypt } from './crypto.js';
 
 export class IMAPHandler {
   private encryptionKey: string;
   private connections: Map<string, { config: IMAPConfig; imap?: Imap }> = new Map();
   private connectionPool: Map<string, Promise<Imap>> = new Map();
+  private smtpConfigs: Map<string, SMTPConfig> = new Map();
   
   // 環境変数によるタイムアウト設定（デフォルト60秒）
   private readonly DEFAULT_TIMEOUT = 60000;
@@ -42,6 +44,9 @@ export class IMAPHandler {
           user,
           password
         });
+        
+        // SMTP設定も同時に読み込み
+        this.loadSMTPConfig(accountName);
       }
     }
     
@@ -57,8 +62,57 @@ export class IMAPHandler {
       
       if (server && domain && username && password) {
         this.addXServerAccount(accountName, server, domain, username, password);
+        
+        // XServer用のSMTP設定を読み込み
+        this.loadXServerSMTPConfig(accountName, server, username, password);
       }
     }
+  }
+
+  private loadSMTPConfig(accountName: string): void {
+    // SMTP設定を環境変数から読み込み
+    const smtpHost = process.env[`SMTP_HOST_${accountName}`];
+    const smtpPort = parseInt(process.env[`SMTP_PORT_${accountName}`] || '587');
+    const smtpSecure = process.env[`SMTP_SECURE_${accountName}`] === 'true';
+    const smtpUser = process.env[`SMTP_USER_${accountName}`];
+    const smtpPassword = process.env[`SMTP_PASSWORD_${accountName}`];
+    
+    if (smtpHost && smtpUser && smtpPassword) {
+      this.smtpConfigs.set(accountName, {
+        host: smtpHost,
+        port: smtpPort,
+        secure: smtpSecure,
+        user: smtpUser,
+        password: smtpPassword
+      });
+    } else {
+      // SMTP設定がない場合はIMAPと同じホストを推測
+      const imapConnection = this.connections.get(accountName);
+      if (imapConnection) {
+        const smtpHost = imapConnection.config.host.replace('imap', 'smtp');
+        this.smtpConfigs.set(accountName, {
+          host: smtpHost,
+          port: 587,
+          secure: false,
+          user: imapConnection.config.user,
+          password: imapConnection.config.password
+        });
+      }
+    }
+  }
+
+  private loadXServerSMTPConfig(accountName: string, server: string, username: string, password: string): void {
+    // XServer用のSMTP設定 - ホスト名とユーザー名を正しい形式に修正
+    const connection = this.connections.get(accountName);
+    const domain = connection?.config.user.split('@')[1] || 'h-fpo.com';
+    
+    this.smtpConfigs.set(accountName, {
+      host: `${server}.xserver.jp`, // 完全なホスト名
+      port: 587,
+      secure: false,
+      user: `${username}@${domain}`, // 完全なメールアドレス
+      password: password
+    });
   }
 
   addAccount(accountName: string, config: IMAPConfig): void {
@@ -624,6 +678,77 @@ export class IMAPHandler {
     };
     
     this.addAccount(accountName, config);
+  }
+
+  async sendEmail(accountName: string, params: SendEmailParams): Promise<SendEmailResult> {
+    try {
+      const smtpConfig = this.smtpConfigs.get(accountName);
+      if (!smtpConfig) {
+        return {
+          success: false,
+          error: `SMTP configuration not found for account: ${accountName}`
+        };
+      }
+
+      // パスワードの復号
+      const decryptedPassword = decrypt(smtpConfig.password, this.encryptionKey);
+      
+      // nodemailerのトランスポーターを作成
+      const transporter = nodemailer.createTransport({
+        host: smtpConfig.host,
+        port: smtpConfig.port,
+        secure: smtpConfig.secure,
+        auth: {
+          user: smtpConfig.user,
+          pass: decryptedPassword
+        },
+        connectionTimeout: this.connectionTimeout,
+        greetingTimeout: this.operationTimeout,
+        socketTimeout: this.operationTimeout
+      });
+
+      // メール送信オプションの構築
+      const mailOptions: any = {
+        from: smtpConfig.user,
+        to: Array.isArray(params.to) ? params.to.join(', ') : params.to,
+        subject: params.subject,
+        text: params.text,
+        html: params.html,
+        cc: params.cc ? (Array.isArray(params.cc) ? params.cc.join(', ') : params.cc) : undefined,
+        bcc: params.bcc ? (Array.isArray(params.bcc) ? params.bcc.join(', ') : params.bcc) : undefined,
+        attachments: params.attachments?.map(att => ({
+          filename: att.filename,
+          content: att.content,
+          contentType: att.contentType
+        }))
+      };
+
+      // 返信ヘッダーの追加
+      if (params.replyTo) {
+        mailOptions.replyTo = params.replyTo;
+      }
+      
+      if (params.inReplyTo) {
+        mailOptions.inReplyTo = params.inReplyTo;
+      }
+      
+      if (params.references && params.references.length > 0) {
+        mailOptions.references = params.references;
+      }
+
+      // メール送信
+      const info = await transporter.sendMail(mailOptions);
+      
+      return {
+        success: true,
+        messageId: info.messageId
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: `SMTP send failed for ${accountName}: ${error instanceof Error ? error.message : 'Unknown error'}`
+      };
+    }
   }
 }
 

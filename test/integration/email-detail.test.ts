@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeAll } from 'vitest';
-import { TestHelper } from './helpers.js';
+import { TestHelper } from '../utils/helpers.js';
 
 describe('Email Detail Tests', () => {
   let helper: TestHelper;
