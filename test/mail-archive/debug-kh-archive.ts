@@ -136,10 +136,10 @@ async function debugKHArchive() {
   }
 }
 
-// MCP経由でのテストも実行
+// MCP経由での単一メールアーカイブテスト
 async function debugMCPArchive() {
-  console.log('\n\n🔍 MCP経由でのアーカイブテスト');
-  console.log('================================');
+  console.log('\n\n🔍 MCP経由での単一メールアーカイブテスト');
+  console.log('========================================');
 
   const server = new MCPEmailServer();
   const accountName = 'kh_h_fpo_com';
@@ -177,8 +177,8 @@ async function debugMCPArchive() {
     const testEmailId = listData.emails[0].id;
     console.log(`🎯 テスト対象メールID: ${testEmailId}`);
 
-    // アーカイブ実行
-    console.log('\n2. MCP経由でアーカイブ実行');
+    // 単一メールアーカイブ実行
+    console.log('\n2. MCP経由で単一メールアーカイブ実行');
     const archiveRequest = {
       jsonrpc: '2.0' as const,
       id: 'test-archive',
@@ -199,7 +199,7 @@ async function debugMCPArchive() {
     if (archiveResponse.error) {
       console.error('❌ MCPアーカイブエラー:', archiveResponse.error);
     } else {
-      console.log('✅ MCPアーカイブ成功');
+      console.log('✅ MCP単一メールアーカイブ成功');
     }
 
   } catch (error) {
@@ -207,16 +207,240 @@ async function debugMCPArchive() {
   }
 }
 
+// MCP経由での複数メールアーカイブテスト
+async function debugMCPBulkArchive() {
+  console.log('\n\n🔍 MCP経由での複数メールアーカイブテスト');
+  console.log('========================================');
+
+  const server = new MCPEmailServer();
+  const accountName = 'kh_h_fpo_com';
+
+  try {
+    // メール一覧取得（複数メール用）
+    console.log('1. MCP経由でメール一覧取得（複数メール用）');
+    const listRequest = {
+      jsonrpc: '2.0' as const,
+      id: 'test-bulk-list',
+      method: 'tools/call',
+      params: {
+        name: 'list_emails',
+        arguments: {
+          account_name: accountName,
+          limit: 5
+        }
+      }
+    };
+
+    const listResponse = await server.handleRequest(listRequest);
+    console.log('メール一覧レスポンス:', JSON.stringify(listResponse, null, 2));
+
+    if (listResponse.error) {
+      console.error('❌ メール一覧取得エラー:', listResponse.error);
+      return;
+    }
+
+    const listData = JSON.parse(listResponse.result.content[0].text);
+    if (!listData.emails || listData.emails.length < 2) {
+      console.log('📭 複数メールテストに十分なメールがありません（2件以上必要）');
+      return;
+    }
+
+    // 複数メールIDを選択（最大3件）
+    const testEmailIds = listData.emails.slice(0, Math.min(3, listData.emails.length)).map((email: any) => email.id);
+    console.log(`🎯 テスト対象メールIDs: ${testEmailIds.join(', ')}`);
+    console.log(`📧 対象メール件数: ${testEmailIds.length}件`);
+
+    // 複数メールアーカイブ実行（配列形式）
+    console.log('\n2. MCP経由で複数メールアーカイブ実行（配列形式）');
+    const bulkArchiveRequest = {
+      jsonrpc: '2.0' as const,
+      id: 'test-bulk-archive',
+      method: 'tools/call',
+      params: {
+        name: 'archive_email',
+        arguments: {
+          account_name: accountName,
+          email_id: testEmailIds, // 配列で複数メールID指定
+          remove_unread: true
+        }
+      }
+    };
+
+    const bulkArchiveResponse = await server.handleRequest(bulkArchiveRequest);
+    console.log('複数メールアーカイブレスポンス:', JSON.stringify(bulkArchiveResponse, null, 2));
+
+    if (bulkArchiveResponse.error) {
+      console.error('❌ MCP複数メールアーカイブエラー:', bulkArchiveResponse.error);
+    } else {
+      console.log('✅ MCP複数メールアーカイブ成功');
+      
+      // レスポンスの詳細分析
+      const bulkData = JSON.parse(bulkArchiveResponse.result.content[0].text);
+      console.log('\n📊 複数メールアーカイブ結果分析:');
+      console.log(`   総メール数: ${bulkData.total}件`);
+      console.log(`   成功: ${bulkData.successful}件`);
+      console.log(`   失敗: ${bulkData.failed}件`);
+      
+      if (bulkData.results && bulkData.results.length > 0) {
+        console.log('\n✅ 成功したメール:');
+        bulkData.results.forEach((result: any, index: number) => {
+          console.log(`   ${index + 1}. メールID: ${result.email_id} - ステータス: ${result.status}`);
+        });
+      }
+      
+      if (bulkData.errors && bulkData.errors.length > 0) {
+        console.log('\n❌ 失敗したメール:');
+        bulkData.errors.forEach((error: any, index: number) => {
+          console.log(`   ${index + 1}. メールID: ${error.email_id} - エラー: ${error.error}`);
+        });
+      }
+    }
+
+  } catch (error) {
+    console.error('❌ MCP複数メールテストエラー:', error);
+  }
+}
+
+// 混合テスト（Gmail + IMAP）
+async function debugMixedAccountArchive() {
+  console.log('\n\n🔍 混合アカウント（Gmail + IMAP）アーカイブテスト');
+  console.log('================================================');
+
+  const server = new MCPEmailServer();
+  const gmailAccount = 'kentaroh7'; // 実際のGmailアカウント
+  const imapAccount = 'kh_h_fpo_com'; // IMAPアカウント
+
+  try {
+    // Gmail メール取得
+    console.log('1. Gmailメール一覧取得');
+    const gmailListRequest = {
+      jsonrpc: '2.0' as const,
+      id: 'test-gmail-list',
+      method: 'tools/call',
+      params: {
+        name: 'list_emails',
+        arguments: {
+          account_name: gmailAccount,
+          limit: 2
+        }
+      }
+    };
+
+    const gmailListResponse = await server.handleRequest(gmailListRequest);
+    let gmailEmailIds: string[] = [];
+    
+    if (!gmailListResponse.error) {
+      const gmailData = JSON.parse(gmailListResponse.result.content[0].text);
+      if (gmailData.emails && gmailData.emails.length > 0) {
+        gmailEmailIds = gmailData.emails.slice(0, 1).map((email: any) => email.id);
+        console.log(`📧 Gmail メールID: ${gmailEmailIds.join(', ')}`);
+      }
+    }
+
+    // IMAP メール取得
+    console.log('\n2. IMAPメール一覧取得');
+    const imapListRequest = {
+      jsonrpc: '2.0' as const,
+      id: 'test-imap-list',
+      method: 'tools/call',
+      params: {
+        name: 'list_emails',
+        arguments: {
+          account_name: imapAccount,
+          limit: 2
+        }
+      }
+    };
+
+    const imapListResponse = await server.handleRequest(imapListRequest);
+    let imapEmailIds: string[] = [];
+    
+    if (!imapListResponse.error) {
+      const imapData = JSON.parse(imapListResponse.result.content[0].text);
+      if (imapData.emails && imapData.emails.length > 0) {
+        imapEmailIds = imapData.emails.slice(0, 1).map((email: any) => email.id);
+        console.log(`📧 IMAP メールID: ${imapEmailIds.join(', ')}`);
+      }
+    }
+
+    // 各アカウントで個別にアーカイブテスト
+    if (gmailEmailIds.length > 0) {
+      console.log('\n3. Gmailアーカイブテスト');
+      const gmailArchiveRequest = {
+        jsonrpc: '2.0' as const,
+        id: 'test-gmail-archive',
+        method: 'tools/call',
+        params: {
+          name: 'archive_email',
+          arguments: {
+            account_name: gmailAccount,
+            email_id: gmailEmailIds,
+            remove_unread: true
+          }
+        }
+      };
+
+      const gmailArchiveResponse = await server.handleRequest(gmailArchiveRequest);
+      if (gmailArchiveResponse.error) {
+        console.error('❌ Gmailアーカイブエラー:', gmailArchiveResponse.error);
+      } else {
+        console.log('✅ Gmailアーカイブ成功');
+      }
+    }
+
+    if (imapEmailIds.length > 0) {
+      console.log('\n4. IMAPアーカイブテスト');
+      const imapArchiveRequest = {
+        jsonrpc: '2.0' as const,
+        id: 'test-imap-archive',
+        method: 'tools/call',
+        params: {
+          name: 'archive_email',
+          arguments: {
+            account_name: imapAccount,
+            email_id: imapEmailIds,
+            remove_unread: false
+          }
+        }
+      };
+
+      const imapArchiveResponse = await server.handleRequest(imapArchiveRequest);
+      if (imapArchiveResponse.error) {
+        console.error('❌ IMAPアーカイブエラー:', imapArchiveResponse.error);
+      } else {
+        console.log('✅ IMAPアーカイブ成功');
+      }
+    }
+
+  } catch (error) {
+    console.error('❌ 混合アカウントテストエラー:', error);
+  }
+}
+
 // メイン実行
 async function main() {
-  console.log('IMAP Archive Debug Script for kh@h-fpo.com');
-  console.log('===========================================');
+  console.log('Enhanced IMAP Archive Debug Script - 複数メール対応版');
+  console.log('===================================================');
   console.log(`実行時刻: ${new Date().toLocaleString()}`);
 
+  // 基本的なIMAPアーカイブテスト
   await debugKHArchive();
+  
+  // MCP経由での単一メールアーカイブテスト
   await debugMCPArchive();
+  
+  // MCP経由での複数メールアーカイブテスト（新機能）
+  await debugMCPBulkArchive();
+  
+  // 混合アカウントテスト（Gmail + IMAP）
+  await debugMixedAccountArchive();
 
-  console.log('\n🏁 デバッグ完了');
+  console.log('\n🏁 拡張デバッグ完了');
+  console.log('テスト内容:');
+  console.log('- ✅ 基本IMAPアーカイブ');
+  console.log('- ✅ MCP単一メールアーカイブ');
+  console.log('- ✅ MCP複数メールアーカイブ（新機能）');
+  console.log('- ✅ 混合アカウント（Gmail + IMAP）アーカイブ');
 }
 
 main().catch(console.error); 

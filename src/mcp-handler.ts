@@ -167,12 +167,17 @@ export class MCPEmailProtocolHandler {
             },
             {
               name: 'archive_email',
-              description: 'Archive an email (automatically detects account type and uses appropriate method)',
+              description: 'Archive one or multiple emails (automatically detects account type and uses appropriate method)',
               inputSchema: {
                 type: 'object',
                 properties: {
                   account_name: { type: 'string', description: 'Name of the email account' },
-                  email_id: { type: 'string', description: 'ID of the email to archive' },
+                  email_id: { 
+                    oneOf: [
+                      { type: 'string', description: 'ID of a single email to archive' },
+                      { type: 'array', items: { type: 'string' }, description: 'Array of email IDs to archive' }
+                    ]
+                  },
                   remove_unread: { type: 'boolean', description: 'Whether to also remove UNREAD label (Gmail only)', default: false }
                 },
                 required: ['account_name', 'email_id']
@@ -382,28 +387,62 @@ export class MCPEmailProtocolHandler {
     try {
       // 必須パラメータチェック
       if (!args.account_name || !args.email_id) {
-      return this.createErrorResponse(requestId, {
+        return this.createErrorResponse(requestId, {
           code: -32602,
           message: 'account_name and email_id are required'
-      });
-    }
+        });
+      }
 
       const accountType = this.getAccountType(args.account_name);
       
-      if (accountType === 'gmail') {
-        const actualAccountName = this.mapGmailAccountName(args.account_name);
-        const result = await this.gmailHandler.archiveEmail(actualAccountName, args.email_id, args.remove_unread);
-        return this.createResponse(requestId, { result });
-      } else {
-        // IMAP
-        const result = await this.imapHandler.archiveEmail(args.account_name, args.email_id);
-        return this.createResponse(requestId, { result });
+      // email_idが配列かどうかをチェック
+      const emailIds = Array.isArray(args.email_id) ? args.email_id : [args.email_id];
+      
+      if (emailIds.length === 0) {
+        return this.createErrorResponse(requestId, {
+          code: -32602,
+          message: 'At least one email_id is required'
+        });
       }
+
+      const results = [];
+      const errors = [];
+
+      for (const emailId of emailIds) {
+        try {
+          if (accountType === 'gmail') {
+            const actualAccountName = this.mapGmailAccountName(args.account_name);
+            const result = await this.gmailHandler.archiveEmail(actualAccountName, emailId, args.remove_unread);
+            results.push({ email_id: emailId, status: 'success', result });
+          } else {
+            // IMAP
+            const result = await this.imapHandler.archiveEmail(args.account_name, emailId);
+            results.push({ email_id: emailId, status: 'success', result });
+          }
+        } catch (error) {
+          console.log(`[DEBUG] Archive error for ${emailId}:`, error);
+          errors.push({ 
+            email_id: emailId, 
+            status: 'error', 
+            error: error instanceof Error ? error.message : 'Unknown error' 
+          });
+        }
+      }
+
+      const response = {
+        total: emailIds.length,
+        successful: results.length,
+        failed: errors.length,
+        results,
+        errors
+      };
+
+      return this.createResponse(requestId, response);
     } catch (error) {
       console.log('[DEBUG] Archive error:', error);
       return this.createErrorResponse(requestId, {
         code: -32603,
-        message: `Archive failed: Failed to archive email for ${args.account_name}: ${error instanceof Error ? error.message : 'Unknown error'}`
+        message: `Archive failed: Failed to archive emails for ${args.account_name}: ${error instanceof Error ? error.message : 'Unknown error'}`
       });
     }
   }

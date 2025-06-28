@@ -127,8 +127,21 @@ describe('Unified Tools Tests', () => {
       };
 
       const response = await handler.handleRequest(request);
-      expect(response.error).toBeDefined();
-      expect(response.error?.message).toContain('Failed to archive email');
+      
+      // 複数メール対応の新しいレスポンス形式を確認
+      expect(response.error).toBeUndefined();
+      expect(response.result?.content?.[0]?.text).toBeDefined();
+      
+      const data = JSON.parse(response.result.content[0].text);
+      expect(data).toHaveProperty('total', 1);
+      expect(data).toHaveProperty('successful', 0);
+      expect(data).toHaveProperty('failed', 1);
+      expect(data).toHaveProperty('errors');
+      expect(Array.isArray(data.errors)).toBe(true);
+      expect(data.errors.length).toBe(1);
+      expect(data.errors[0]).toHaveProperty('email_id', 'dummy_id');
+      expect(data.errors[0]).toHaveProperty('status', 'error');
+      expect(data.errors[0].error).toContain('IMAP account non_existent_account not found');
     });
 
     test('必須パラメータが不足している場合のエラーハンドリング', async () => {

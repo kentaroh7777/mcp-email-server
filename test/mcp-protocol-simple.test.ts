@@ -306,7 +306,7 @@ describe('MCPEmailProtocolHandler', () => {
       });
     });
 
-    it('should handle unified archive_email tool', async () => {
+    it('should handle unified archive_email tool (single email)', async () => {
       const request: MCPRequest = {
         jsonrpc: '2.0',
         id: 11,
@@ -322,17 +322,69 @@ describe('MCPEmailProtocolHandler', () => {
 
       const response = await handler.handleRequest(request);
 
-      // アカウントが存在しない場合のエラーを確認
-      expect(response.error).toMatchObject({
-        code: -32603,
-        message: 'Archive failed: Failed to archive email for test_account: IMAP archiveEmail failed: IMAP account test_account not found'
+      expect(response.jsonrpc).toBe('2.0');
+      expect(response.id).toBe(11);
+      
+      // 複数メール対応の新しいレスポンス形式を確認
+      const data = response.result.content?.[0]?.text ? JSON.parse(response.result.content[0].text) : null;
+      expect(data).toBeDefined();
+      expect(data).toHaveProperty('total', 1);
+      expect(data).toHaveProperty('successful', 0);
+      expect(data).toHaveProperty('failed', 1);
+      expect(data).toHaveProperty('results');
+      expect(data).toHaveProperty('errors');
+      expect(Array.isArray(data.results)).toBe(true);
+      expect(Array.isArray(data.errors)).toBe(true);
+      expect(data.errors.length).toBe(1);
+      expect(data.errors[0]).toHaveProperty('email_id', 'test_id');
+      expect(data.errors[0]).toHaveProperty('status', 'error');
+      expect(data.errors[0]).toHaveProperty('error');
+    });
+
+    it('should handle unified archive_email tool (multiple emails)', async () => {
+      const request: MCPRequest = {
+        jsonrpc: '2.0',
+        id: 12,
+        method: 'tools/call',
+        params: {
+          name: 'archive_email',
+          arguments: {
+            account_name: 'test_account',
+            email_id: ['test_id1', 'test_id2', 'test_id3']
+          }
+        }
+      };
+
+      const response = await handler.handleRequest(request);
+
+      expect(response.jsonrpc).toBe('2.0');
+      expect(response.id).toBe(12);
+      
+      // 複数メール対応のレスポンス形式を確認
+      const data = response.result.content?.[0]?.text ? JSON.parse(response.result.content[0].text) : null;
+      expect(data).toBeDefined();
+      expect(data).toHaveProperty('total', 3);
+      expect(data).toHaveProperty('successful', 0);
+      expect(data).toHaveProperty('failed', 3);
+      expect(data).toHaveProperty('results');
+      expect(data).toHaveProperty('errors');
+      expect(Array.isArray(data.results)).toBe(true);
+      expect(Array.isArray(data.errors)).toBe(true);
+      expect(data.errors.length).toBe(3);
+      
+      // 各エラーの詳細確認
+      const expectedIds = ['test_id1', 'test_id2', 'test_id3'];
+      data.errors.forEach((error: any, index: number) => {
+        expect(error).toHaveProperty('email_id', expectedIds[index]);
+        expect(error).toHaveProperty('status', 'error');
+        expect(error).toHaveProperty('error');
       });
     });
 
     it('should handle improved get_account_stats tool', async () => {
       const request: MCPRequest = {
         jsonrpc: '2.0',
-        id: 12,
+        id: 13,
         method: 'tools/call',
         params: {
           name: 'get_account_stats',
@@ -343,7 +395,7 @@ describe('MCPEmailProtocolHandler', () => {
       const response = await handler.handleRequest(request);
 
       expect(response.jsonrpc).toBe('2.0');
-      expect(response.id).toBe(12);
+      expect(response.id).toBe(13);
       
       // 改良されたレスポンス構造を確認
       const data = response.result.content?.[0]?.text ? JSON.parse(response.result.content[0].text) : null;
@@ -362,7 +414,7 @@ describe('MCPEmailProtocolHandler', () => {
     it('should always return valid MCPResponse format', async () => {
       const request: MCPRequest = {
         jsonrpc: '2.0',
-        id: 13,
+        id: 14,
         method: 'initialize',
         params: {}
       };
@@ -370,7 +422,7 @@ describe('MCPEmailProtocolHandler', () => {
       const response = await handler.handleRequest(request);
 
       expect(response).toHaveProperty('jsonrpc', '2.0');
-      expect(response).toHaveProperty('id', 13);
+      expect(response).toHaveProperty('id', 14);
       expect(response).toSatisfy((res: MCPResponse) => {
         return res.result !== undefined || res.error !== undefined;
       });
