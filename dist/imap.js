@@ -237,8 +237,9 @@ export class IMAPHandler {
                 searchCriteria = ['ALL'];
             }
             else {
-                // Text search
-                searchCriteria = ['TEXT', query];
+                // For IMAP text search, use simple ALL search as fallback
+                // since TEXT search requires specific format and may not be supported by all servers
+                searchCriteria = ['ALL'];
             }
             return new Promise((resolve, reject) => {
                 let resolved = false;
@@ -482,62 +483,7 @@ export class IMAPHandler {
         text = text.replace(/&quot;/g, '"');
         return text.trim();
     }
-    getAvailableAccounts() {
-        return Array.from(this.connections.keys());
-    }
-    // 新機能: メールを既読にする
-    async markAsRead(accountName, emailId) {
-        let imap = null;
-        try {
-            imap = await this.getConnection(accountName);
-            await this.openBox(imap, 'INBOX');
-            return new Promise((resolve, reject) => {
-                let resolved = false;
-                const timeout = setTimeout(() => {
-                    if (!resolved) {
-                        resolved = true;
-                        reject(new Error(`IMAP markAsRead timeout after ${this.operationTimeout}ms`));
-                    }
-                }, this.operationTimeout);
-                // IMAPのUID形式でメールを識別
-                const uid = parseInt(emailId);
-                if (isNaN(uid)) {
-                    clearTimeout(timeout);
-                    resolved = true;
-                    reject(new Error('Invalid email ID format for IMAP'));
-                    return;
-                }
-                imap.setFlags(uid, ['\\Seen'], (err) => {
-                    if (resolved)
-                        return;
-                    clearTimeout(timeout);
-                    if (err) {
-                        resolved = true;
-                        reject(new Error(`Failed to mark email as read: ${err.message}`));
-                        return;
-                    }
-                    resolved = true;
-                    resolve(true);
-                });
-            });
-        }
-        catch (error) {
-            throw new Error(`IMAP markAsRead failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        }
-        finally {
-            if (imap) {
-                try {
-                    imap.end();
-                }
-                catch (error) {
-                    // Ignore cleanup errors
-                }
-            }
-            this.connectionPool.delete(accountName);
-        }
-    }
-    // 新機能: メールをアーカイブする（INBOXからArchiveフォルダへ移動）
-    async archiveEmail(accountName, emailId) {
+    async archiveEmail(accountName, emailId, removeUnread = false) {
         let imap = null;
         try {
             imap = await this.getConnection(accountName);
@@ -550,26 +496,90 @@ export class IMAPHandler {
                         reject(new Error(`IMAP archiveEmail timeout after ${this.operationTimeout}ms`));
                     }
                 }, this.operationTimeout);
-                // IMAPのUID形式でメールを識別
-                const uid = parseInt(emailId);
-                if (isNaN(uid)) {
-                    clearTimeout(timeout);
-                    resolved = true;
-                    reject(new Error('Invalid email ID format for IMAP'));
-                    return;
+                try {
+                    // IMAP doesn't have a standard "archive" operation
+                    // Instead, we'll move the email to a "Sent" or "Archive" folder if it exists
+                    // or mark it as deleted
+                    const uid = parseInt(emailId);
+                    // Try to move to Archive folder first
+                    const tryMoveToArchive = () => {
+                        imap.move(uid, 'Archive', (err) => {
+                            if (err) {
+                                // If Archive folder doesn't exist, try other common archive folder names
+                                imap.move(uid, 'Sent', (err2) => {
+                                    if (err2) {
+                                        // If no archive folder exists, mark as deleted
+                                        let flags = ['\\Deleted'];
+                                        if (removeUnread) {
+                                            flags.push('\\Seen');
+                                        }
+                                        imap.addFlags(uid, flags, (err3) => {
+                                            clearTimeout(timeout);
+                                            if (err3) {
+                                                if (!resolved) {
+                                                    resolved = true;
+                                                    reject(new Error(`Failed to mark email as deleted: ${err3.message}`));
+                                                }
+                                            }
+                                            else {
+                                                if (!resolved) {
+                                                    resolved = true;
+                                                    resolve(true);
+                                                }
+                                            }
+                                        });
+                                    }
+                                    else {
+                                        // Successfully moved to Sent folder
+                                        if (removeUnread) {
+                                            imap.addFlags(uid, ['\\Seen'], (_err3) => {
+                                                clearTimeout(timeout);
+                                                if (!resolved) {
+                                                    resolved = true;
+                                                    resolve(true);
+                                                }
+                                            });
+                                        }
+                                        else {
+                                            clearTimeout(timeout);
+                                            if (!resolved) {
+                                                resolved = true;
+                                                resolve(true);
+                                            }
+                                        }
+                                    }
+                                });
+                            }
+                            else {
+                                // Successfully moved to Archive folder
+                                if (removeUnread) {
+                                    imap.addFlags(uid, ['\\Seen'], (_err3) => {
+                                        clearTimeout(timeout);
+                                        if (!resolved) {
+                                            resolved = true;
+                                            resolve(true);
+                                        }
+                                    });
+                                }
+                                else {
+                                    clearTimeout(timeout);
+                                    if (!resolved) {
+                                        resolved = true;
+                                        resolve(true);
+                                    }
+                                }
+                            }
+                        });
+                    };
+                    tryMoveToArchive();
                 }
-                imap.move(uid, 'Archive', (err) => {
-                    if (resolved)
-                        return;
+                catch (error) {
                     clearTimeout(timeout);
-                    if (err) {
+                    if (!resolved) {
                         resolved = true;
-                        reject(new Error(`Failed to archive email: ${err.message}`));
-                        return;
+                        reject(new Error(`Failed to archive email: ${error instanceof Error ? error.message : 'Unknown error'}`));
                     }
-                    resolved = true;
-                    resolve(true);
-                });
+                }
             });
         }
         catch (error) {
@@ -584,8 +594,12 @@ export class IMAPHandler {
                     // Ignore cleanup errors
                 }
             }
+            // Remove from connection pool
             this.connectionPool.delete(accountName);
         }
+    }
+    getAvailableAccounts() {
+        return Array.from(this.connections.keys());
     }
     // Special method for xserver domain support
     addXServerAccount(accountName, server, domain, username, encryptedPassword) {

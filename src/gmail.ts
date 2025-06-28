@@ -46,15 +46,14 @@ export class GmailHandler {
   }
 
   private loadGmailConfigs() {
-    // First try the new format (GMAIL_ACCESS_TOKEN_accountname)
-    const gmailTokenKeys = Object.keys(process.env).filter(key => key.startsWith('GMAIL_ACCESS_TOKEN_'));
+    // Load Gmail accounts using refresh tokens
+    const gmailRefreshKeys = Object.keys(process.env).filter(key => key.startsWith('GMAIL_REFRESH_TOKEN_'));
     const clientId = process.env.GMAIL_CLIENT_ID;
     const clientSecret = process.env.GMAIL_CLIENT_SECRET;
     
-    for (const tokenKey of gmailTokenKeys) {
-      const accountName = tokenKey.replace('GMAIL_ACCESS_TOKEN_', '');
-      const refreshTokenKey = `GMAIL_REFRESH_TOKEN_${accountName}`;
-      const refreshToken = process.env[refreshTokenKey];
+    for (const refreshKey of gmailRefreshKeys) {
+      const accountName = refreshKey.replace('GMAIL_REFRESH_TOKEN_', '');
+      const refreshToken = process.env[refreshKey];
       
       if (clientId && clientSecret && refreshToken) {
         this.configs.set(accountName, {

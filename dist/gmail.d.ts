@@ -14,12 +14,11 @@ export declare class GmailHandler {
     getEmailDetail(accountName: string, emailId: string): Promise<EmailDetail>;
     getUnreadCount(accountName: string, folder?: string): Promise<number>;
     getAvailableAccounts(): string[];
-    markAsRead(accountName: string, emailId: string): Promise<boolean>;
-    archiveEmail(accountName: string, emailId: string): Promise<boolean>;
     private parseDateTime;
     private formatEmailMessage;
     private formatEmailDetail;
     private extractEmailBody;
     private extractAttachments;
+    archiveEmail(accountName: string, emailId: string, removeUnread?: boolean): Promise<boolean>;
 }
 export declare const gmailTools: Tool[];

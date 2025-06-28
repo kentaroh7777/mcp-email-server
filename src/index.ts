@@ -1,690 +1,108 @@
 import * as readline from 'readline';
 import * as dotenv from 'dotenv';
-import { MCPRequest, MCPResponse, InitializeResult, Tool, EmailMessage } from './types.js';
-import { GmailHandler, gmailTools } from './gmail.js';
-import { IMAPHandler, imapTools } from './imap.js';
-
-interface UnifiedEmailSearch {
-  query: string;
-  accounts: 'ALL' | 'GMAIL_ONLY' | 'IMAP_ONLY' | string[];
-  limit?: number;
-  sortBy?: 'date' | 'relevance';
-}
-
-interface AccountStatus {
-  name: string;
-  type: 'gmail' | 'imap';
-  status: 'connected' | 'error' | 'not_configured';
-  lastChecked: string;
-  errorMessage?: string;
-}
+import { MCPRequest, MCPResponse } from './types.js';
+import { MCPEmailProtocolHandler } from './mcp-handler.js';
 
 dotenv.config();
 
 export class MCPEmailServer {
-  private gmailHandler: GmailHandler;
-  private imapHandler: IMAPHandler;
-  private encryptionKey: string;
+  private handler: MCPEmailProtocolHandler;
 
   constructor() {
-    this.gmailHandler = new GmailHandler();
-    this.encryptionKey = process.env.EMAIL_ENCRYPTION_KEY || 'default-key';
-    this.imapHandler = new IMAPHandler(this.encryptionKey);
+    this.handler = new MCPEmailProtocolHandler();
   }
 
   async handleRequest(request: MCPRequest): Promise<MCPResponse> {
-    // Debug: Log incoming requests
-    // console.error(`[MCP DEBUG] Incoming request: ${JSON.stringify(request, null, 2)}`);
-    
-    try {
-      switch (request.method) {
-        case 'initialize':
-          return this.handleInitialize(request);
-        
-        case 'tools/list':
-          return this.handleToolsList(request);
-        
-        case 'tools/call':
-          return await this.handleToolsCall(request);
-        
-        case 'resources/list':
-          return this.handleResourcesList(request);
-        
-        default:
-          return {
-            jsonrpc: '2.0',
-            id: request.id,
-            error: {
-              code: -32601,
-              message: 'Method not found'
-            }
-          };
-      }
-    } catch (error) {
-      return {
-        jsonrpc: '2.0',
-        id: request.id,
-        error: {
-          code: -32603,
-          message: 'Internal error',
-          data: error instanceof Error ? error.message : 'Unknown error'
-        }
-      };
-    }
+    return await this.handler.handleRequest(request);
   }
 
-  private handleInitialize(request: MCPRequest): MCPResponse {
-    const result: InitializeResult = {
-      protocolVersion: '2024-11-05',
-      capabilities: {
-        tools: { listChanged: true },
-        resources: { subscribe: true, listChanged: true }
-      },
-      serverInfo: {
-        name: 'mcp-email-server',
-        version: '1.0.0'
-      }
-    };
-
-    return {
-      jsonrpc: '2.0',
-      id: request.id,
-      result
-    };
-  }
-
-  private handleToolsList(request: MCPRequest): MCPResponse {
-    const unifiedTools: Tool[] = [
-      {
-        name: 'list_accounts',
-        description: 'List all configured email accounts with their status',
-        inputSchema: {
-          type: 'object',
-          properties: {},
-          required: []
-        }
-      },
-      {
-        name: 'test_connection',
-        description: 'Test connection to a specific email account',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            account_name: {
-              type: 'string',
-              description: 'Name of the account to test'
-            }
-          },
-          required: ['account_name']
-        }
-      },
-      {
-        name: 'search_all_emails',
-        description: 'Search emails across all Gmail and IMAP accounts',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            query: {
-              type: 'string',
-              description: 'Search query'
-            },
-            accounts: {
-              type: 'string',
-              enum: ['ALL', 'GMAIL_ONLY', 'IMAP_ONLY'],
-              description: 'Which accounts to search',
-              default: 'ALL'
-            },
-            limit: {
-              type: 'number',
-              description: 'Maximum number of results',
-              default: 20
-            },
-            sortBy: {
-              type: 'string',
-              enum: ['date', 'relevance'],
-              description: 'Sort results by date or relevance',
-              default: 'date'
-            }
-          },
-          required: ['query']
-        }
-      },
-      {
-        name: 'get_account_stats',
-        description: 'Get statistics for all configured accounts',
-        inputSchema: {
-          type: 'object',
-          properties: {},
-          required: []
-        }
-      }
-    ];
-
-    const tools: Tool[] = [
-      ...unifiedTools,
-      ...gmailTools,
-      ...imapTools
-    ];
-
-    return {
-      jsonrpc: '2.0',
-      id: request.id,
-      result: { tools }
-    };
-  }
-
-  private async handleToolsCall(request: MCPRequest): Promise<MCPResponse> {
-    try {
-      const { name, arguments: args } = request.params || {};
-      
-      switch (name) {
-        // Unified tools
-        case 'list_accounts':
-          return await this.handleListAccounts(args, request.id);
-        
-        case 'test_connection':
-          return await this.handleTestConnection(args, request.id);
-        
-        case 'search_all_emails':
-          return await this.handleSearchAllEmails(args, request.id);
-        
-        case 'get_account_stats':
-          return await this.handleGetAccountStats(args, request.id);
-        
-        // Gmail tools
-        case 'list_emails':
-          return await this.handleListEmails(args, request.id);
-        
-        case 'search_emails':
-          return await this.handleSearchEmails(args, request.id);
-        
-        case 'get_email_detail':
-          return await this.handleGetEmailDetail(args, request.id);
-        
-        case 'get_unread_count':
-          return await this.handleGetUnreadCount(args, request.id);
-        
-        // IMAP tools
-        case 'list_imap_emails':
-          return await this.handleListImapEmails(args, request.id);
-        
-        case 'search_imap_emails':
-          return await this.handleSearchImapEmails(args, request.id);
-        
-        case 'get_imap_email_detail':
-          return await this.handleGetImapEmailDetail(args, request.id);
-        
-        case 'get_imap_unread_count':
-          return await this.handleGetImapUnreadCount(args, request.id);
-        
-        default:
-          return {
-            jsonrpc: '2.0',
-            id: request.id,
-            error: {
-              code: -32601,
-              message: `Unknown tool: ${name}`
-            }
-          };
-      }
-    } catch (error) {
-      return {
-        jsonrpc: '2.0',
-        id: request.id,
-        error: {
-          code: -32603,
-          message: `Tool execution failed: ${error instanceof Error ? error.message : 'Unknown error'}`
-        }
-      };
-    }
-  }
-
-  private handleResourcesList(request: MCPRequest): MCPResponse {
-    return {
-      jsonrpc: '2.0',
-      id: request.id,
-      result: { resources: [] }
-    };
-  }
-
-  private async handleListEmails(args: any, requestId: any): Promise<MCPResponse> {
-    try {
-      if (args.account_name === 'ALL') {
-        const allEmails = await this.getAllGmailEmails(args);
-        return this.createResponse(requestId, { emails: allEmails });
-      } else {
-        const emails = await this.gmailHandler.listEmails(args.account_name, args);
-        return this.createResponse(requestId, { emails });
-      }
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  private async handleSearchEmails(args: any, requestId: any): Promise<MCPResponse> {
-    try {
-      if (args.account_name === 'ALL') {
-        const availableAccounts = this.gmailHandler.getAvailableAccounts();
-        const searchPromises = availableAccounts.map(account => 
-          this.gmailHandler.searchEmails(account, args.query, args.limit || 20)
-        );
-        const results = await Promise.all(searchPromises);
-        const allEmails = results.flat().sort((a, b) => 
-          new Date(b.date).getTime() - new Date(a.date).getTime()
-        ).slice(0, args.limit || 20);
-        return this.createResponse(requestId, { emails: allEmails });
-      } else {
-        const emails = await this.gmailHandler.searchEmails(args.account_name, args.query, args.limit || 20);
-        return this.createResponse(requestId, { emails });
-      }
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  private async handleGetEmailDetail(args: any, requestId: any): Promise<MCPResponse> {
-    try {
-      const emailDetail = await this.gmailHandler.getEmailDetail(args.account_name, args.email_id);
-      return this.createResponse(requestId, { email: emailDetail });
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  private async handleGetUnreadCount(args: any, requestId: any): Promise<MCPResponse> {
-    try {
-      if (args.account_name === 'ALL') {
-        const availableAccounts = this.gmailHandler.getAvailableAccounts();
-        const countPromises = availableAccounts.map(async (account) => {
-          const count = await this.gmailHandler.getUnreadCount(account, args.folder || 'INBOX');
-          return { account, count };
-        });
-        const results = await Promise.all(countPromises);
-        const totalCount = results.reduce((sum, result) => sum + result.count, 0);
-        return this.createResponse(requestId, { 
-          totalCount,
-          accountCounts: results
-        });
-      } else {
-        const count = await this.gmailHandler.getUnreadCount(args.account_name, args.folder || 'INBOX');
-        return this.createResponse(requestId, { count });
-      }
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  private async getAllGmailEmails(params: any): Promise<EmailMessage[]> {
-    const availableAccounts = this.gmailHandler.getAvailableAccounts();
-    const emailPromises = availableAccounts.map(account => 
-      this.gmailHandler.listEmails(account, params)
-    );
-    const results = await Promise.all(emailPromises);
-    return results.flat().sort((a, b) => 
-      new Date(b.date).getTime() - new Date(a.date).getTime()
-    ).slice(0, params.limit || 20);
-  }
-
-  private createResponse(id: any, result: any): MCPResponse {
-    // Convert all responses to MCP-compatible format like mcp-todoist
-    const response: MCPResponse = {
-      jsonrpc: '2.0' as const,
-      id,
-      result: {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(result, null, 2)
-          }
-        ]
-      }
-    };
-    // Debug: Log outgoing responses
-    // console.error(`[MCP DEBUG] Outgoing response: ${JSON.stringify(response, null, 2)}`);
-    return response;
-  }
-
-  private async handleListImapEmails(args: any, requestId: any): Promise<MCPResponse> {
-    try {
-      const emails = await this.imapHandler.listEmails(args.account_name, args);
-      return this.createResponse(requestId, { emails });
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  private async handleSearchImapEmails(args: any, requestId: any): Promise<MCPResponse> {
-    try {
-      const emails = await this.imapHandler.searchEmails(args.account_name, args.query, args.limit || 20);
-      return this.createResponse(requestId, { emails });
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  private async handleGetImapEmailDetail(args: any, requestId: any): Promise<MCPResponse> {
-    try {
-      const emailDetail = await this.imapHandler.getEmailDetail(args.account_name, args.email_id);
-      return this.createResponse(requestId, { email: emailDetail });
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  private async handleGetImapUnreadCount(args: any, requestId: any): Promise<MCPResponse> {
-    try {
-      const count = await this.imapHandler.getUnreadCount(args.account_name, args.folder || 'INBOX');
-      return this.createResponse(requestId, { count });
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  // Public methods for account management
+  // IMAPアカウント追加メソッド（設定用）
   addImapAccount(accountName: string, host: string, port: number, secure: boolean, user: string, encryptedPassword: string): void {
-    this.imapHandler.addAccount(accountName, { host, port, secure, user, password: encryptedPassword });
+    this.handler.addImapAccount(accountName, host, port, secure, user, encryptedPassword);
   }
 
   addXServerAccount(accountName: string, server: string, domain: string, username: string, encryptedPassword: string): void {
-    this.imapHandler.addXServerAccount(accountName, server, domain, username, encryptedPassword);
-  }
-
-  // Unified methods implementation
-  private async handleListAccounts(_args: any, requestId: any): Promise<MCPResponse> {
-    try {
-      const accounts: AccountStatus[] = [];
-      
-      // Gmail accounts
-      const gmailAccounts = this.gmailHandler.getAvailableAccounts();
-      for (const account of gmailAccounts) {
-        try {
-          await this.gmailHandler.getUnreadCount(account);
-          accounts.push({
-            name: account,
-            type: 'gmail',
-            status: 'connected',
-            lastChecked: new Date().toISOString()
-          });
-        } catch (error) {
-          accounts.push({
-            name: account,
-            type: 'gmail',
-            status: 'error',
-            lastChecked: new Date().toISOString(),
-            errorMessage: error instanceof Error ? error.message : 'Unknown error'
-          });
-        }
-      }
-      
-      // IMAP accounts
-      const imapAccounts = this.imapHandler.getAvailableAccounts();
-      for (const account of imapAccounts) {
-        try {
-          await this.imapHandler.getUnreadCount(account);
-          accounts.push({
-            name: account,
-            type: 'imap',
-            status: 'connected',
-            lastChecked: new Date().toISOString()
-          });
-        } catch (error) {
-          accounts.push({
-            name: account,
-            type: 'imap',
-            status: 'error',
-            lastChecked: new Date().toISOString(),
-            errorMessage: error instanceof Error ? error.message : 'Unknown error'
-          });
-        }
-      }
-      
-      return this.createResponse(requestId, { accounts });
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  private async handleTestConnection(args: any, requestId: any): Promise<MCPResponse> {
-    try {
-      const { account_name } = args;
-      
-      if (!account_name) {
-        return {
-          jsonrpc: '2.0',
-          id: requestId,
-          error: {
-            code: -32602,
-            message: 'Invalid params: account_name is required'
-          }
-        };
-      }
-      
-      // Check if it's a Gmail account
-      const gmailAccounts = this.gmailHandler.getAvailableAccounts();
-      if (gmailAccounts.includes(account_name)) {
-        try {
-          const count = await this.gmailHandler.getUnreadCount(account_name);
-          return this.createResponse(requestId, {
-            account: account_name,
-            type: 'gmail',
-            status: 'connected',
-            testResult: `Successfully connected. Unread count: ${count}`,
-            timestamp: new Date().toISOString()
-          });
-        } catch (error) {
-          return this.createResponse(requestId, {
-            account: account_name,
-            type: 'gmail',
-            status: 'error',
-            testResult: `Connection failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
-            timestamp: new Date().toISOString()
-          });
-        }
-      }
-      
-      // Check if it's an IMAP account
-      const imapAccounts = this.imapHandler.getAvailableAccounts();
-      if (imapAccounts.includes(account_name)) {
-        try {
-          const count = await this.imapHandler.getUnreadCount(account_name);
-          return this.createResponse(requestId, {
-            account: account_name,
-            type: 'imap',
-            status: 'connected',
-            testResult: `Successfully connected. Unread count: ${count}`,
-            timestamp: new Date().toISOString()
-          });
-        } catch (error) {
-          return this.createResponse(requestId, {
-            account: account_name,
-            type: 'imap',
-            status: 'error',
-            testResult: `Connection failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
-            timestamp: new Date().toISOString()
-          });
-        }
-      }
-      
-      return this.createResponse(requestId, {
-        account: account_name,
-        status: 'not_found',
-        testResult: 'Account not found in configuration',
-        timestamp: new Date().toISOString()
-      });
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  private async handleSearchAllEmails(args: UnifiedEmailSearch, requestId: any): Promise<MCPResponse> {
-    const startTime = Date.now();
-    try {
-      const results: EmailMessage[] = [];
-      const errors: string[] = [];
-      
-      // Gmail search
-      if (args.accounts === 'ALL' || args.accounts === 'GMAIL_ONLY') {
-        const gmailAccounts = this.gmailHandler.getAvailableAccounts();
-        const gmailPromises = gmailAccounts.map(async (account) => {
-          try {
-            const emails = await this.gmailHandler.searchEmails(
-              account, 
-              args.query, 
-              Math.floor((args.limit || 20) / (gmailAccounts.length + this.imapHandler.getAvailableAccounts().length))
-            );
-            return emails;
-          } catch (error) {
-            errors.push(`Gmail ${account}: ${error instanceof Error ? error.message : 'Unknown error'}`);
-            return [];
-          }
-        });
-        
-        const gmailResults = await Promise.all(gmailPromises);
-        results.push(...gmailResults.flat());
-      }
-      
-      // IMAP search
-      if (args.accounts === 'ALL' || args.accounts === 'IMAP_ONLY') {
-        const imapAccounts = this.imapHandler.getAvailableAccounts();
-        const imapPromises = imapAccounts.map(async (account) => {
-          try {
-            const emails = await this.imapHandler.searchEmails(
-              account, 
-              args.query, 
-              Math.floor((args.limit || 20) / (this.gmailHandler.getAvailableAccounts().length + imapAccounts.length))
-            );
-            return emails;
-          } catch (error) {
-            errors.push(`IMAP ${account}: ${error instanceof Error ? error.message : 'Unknown error'}`);
-            return [];
-          }
-        });
-        
-        const imapResults = await Promise.all(imapPromises);
-        results.push(...imapResults.flat());
-      }
-      
-      // Sort results
-      const sortedResults = results.sort((a, b) => {
-        if (args.sortBy === 'relevance') {
-          // Simple relevance score (title match priority)
-          const aScore = a.subject.toLowerCase().includes(args.query.toLowerCase()) ? 1 : 0;
-          const bScore = b.subject.toLowerCase().includes(args.query.toLowerCase()) ? 1 : 0;
-          if (aScore !== bScore) return bScore - aScore;
-        }
-        return new Date(b.date).getTime() - new Date(a.date).getTime();
-      }).slice(0, args.limit || 20);
-      
-      return this.createResponse(requestId, {
-        emails: sortedResults,
-        totalFound: results.length,
-        searchQuery: args.query,
-        responseTime: Date.now() - startTime,
-        errors: errors.length > 0 ? errors : undefined
-      });
-    } catch (error) {
-      throw error;
-    }
-  }
-
-  private async handleGetAccountStats(_args: any, requestId: any): Promise<MCPResponse> {
-    try {
-      const stats: any = {
-        gmail: {},
-        imap: {},
-        summary: {
-          totalAccounts: 0,
-          connectedAccounts: 0,
-          totalUnreadEmails: 0
-        }
-      };
-      
-      // Gmail stats
-      const gmailAccounts = this.gmailHandler.getAvailableAccounts();
-      for (const account of gmailAccounts) {
-        try {
-          const unreadCount = await this.gmailHandler.getUnreadCount(account);
-          stats.gmail[account] = {
-            status: 'connected',
-            unreadCount,
-            lastChecked: new Date().toISOString()
-          };
-          stats.summary.connectedAccounts++;
-          stats.summary.totalUnreadEmails += unreadCount;
-        } catch (error) {
-          stats.gmail[account] = {
-            status: 'error',
-            error: error instanceof Error ? error.message : 'Unknown error',
-            lastChecked: new Date().toISOString()
-          };
-        }
-        stats.summary.totalAccounts++;
-      }
-      
-      // IMAP stats
-      const imapAccounts = this.imapHandler.getAvailableAccounts();
-      for (const account of imapAccounts) {
-        try {
-          const unreadCount = await this.imapHandler.getUnreadCount(account);
-          stats.imap[account] = {
-            status: 'connected',
-            unreadCount,
-            lastChecked: new Date().toISOString()
-          };
-          stats.summary.connectedAccounts++;
-          stats.summary.totalUnreadEmails += unreadCount;
-        } catch (error) {
-          stats.imap[account] = {
-            status: 'error',
-            error: error instanceof Error ? error.message : 'Unknown error',
-            lastChecked: new Date().toISOString()
-          };
-        }
-        stats.summary.totalAccounts++;
-      }
-      
-      return this.createResponse(requestId, stats);
-    } catch (error) {
-      throw error;
-    }
+    this.handler.addXServerAccount(accountName, server, domain, username, encryptedPassword);
   }
 }
 
-const server = new MCPEmailServer();
+// メイン実行部分
+async function main() {
+  const server = new MCPEmailServer();
+  
+  // 環境変数からIMAPアカウントを設定
+  const imapAccounts = [
+    {
+      name: 'info_h_fpo_com',
+      host: process.env.IMAP_HOST_info_h_fpo_com || '',
+      port: parseInt(process.env.IMAP_PORT_info_h_fpo_com || '993'),
+      secure: process.env.IMAP_SECURE_info_h_fpo_com === 'true',
+      user: process.env.IMAP_USER_info_h_fpo_com || '',
+      encryptedPassword: process.env.IMAP_PASSWORD_info_h_fpo_com || ''
+    },
+    {
+      name: 'hello_foobar_taroken',
+      host: process.env.IMAP_HOST_hello_foobar_taroken || '',
+      port: parseInt(process.env.IMAP_PORT_hello_foobar_taroken || '993'),
+      secure: process.env.IMAP_SECURE_hello_foobar_taroken === 'true',
+      user: process.env.IMAP_USER_hello_foobar_taroken || '',
+      encryptedPassword: process.env.IMAP_PASSWORD_hello_foobar_taroken || ''
+    }
+  ];
 
+  // XServerアカウントを設定
+  if (process.env.XSERVER_DOMAIN_xserver && process.env.XSERVER_USERNAME_xserver && process.env.XSERVER_PASSWORD_xserver) {
+    server.addXServerAccount(
+      'xserver',
+      'sv14333.xserver.jp',
+      process.env.XSERVER_DOMAIN_xserver,
+      process.env.XSERVER_USERNAME_xserver,
+      process.env.XSERVER_PASSWORD_xserver
+    );
+  }
+
+  // IMAPアカウントを追加
+  for (const account of imapAccounts) {
+    if (account.host && account.user && account.encryptedPassword) {
+      server.addImapAccount(
+        account.name,
+        account.host,
+        account.port,
+        account.secure,
+        account.user,
+        account.encryptedPassword
+      );
+    }
+  }
+
+  // 標準入力からJSONRPCリクエストを読み取り
 const rl = readline.createInterface({
   input: process.stdin,
-  output: process.stdout,
-  terminal: false
+    output: process.stdout
 });
 
-rl.on('line', async (line: string) => {
-          // console.error(`[MCP DEBUG] Raw input: ${line.trim()}`);
+  rl.on('line', async (line) => {
   try {
-    const request = JSON.parse(line.trim());
+      const request = JSON.parse(line) as MCPRequest;
           const response = await server.handleRequest(request);
-      // console.error(`[MCP DEBUG] Sending response: ${JSON.stringify(response, null, 2)}`);
       console.log(JSON.stringify(response));
   } catch (error) {
-          // console.error(`[MCP DEBUG] Parse error: ${error}`);
-    const errorResponse = {
-      jsonrpc: '2.0' as const,
+      console.error(JSON.stringify({
+        jsonrpc: '2.0',
       id: null,
       error: {
         code: -32700,
         message: 'Parse error'
       }
-    };
-    console.log(JSON.stringify(errorResponse));
+      }));
   }
 });
 
-process.on('SIGINT', () => {
-  rl.close();
+  rl.on('close', () => {
   process.exit(0);
 });
+}
 
-process.on('SIGTERM', () => {
-  rl.close();
-  process.exit(0);
-});
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch(console.error);
+}

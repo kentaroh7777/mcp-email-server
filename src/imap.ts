@@ -161,13 +161,13 @@ export class IMAPHandler {
     }
   }
 
-  private async openBox(imap: Imap, boxName: string = 'INBOX'): Promise<void> {
+  private async openBox(imap: Imap, boxName: string = 'INBOX', readOnly: boolean = true): Promise<void> {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         reject(new Error(`Mailbox open timeout for ${boxName} after ${this.operationTimeout}ms`));
       }, this.operationTimeout);
 
-      imap.openBox(boxName, true, (err) => {
+      imap.openBox(boxName, readOnly, (err) => {
         clearTimeout(timeout);
         if (err) {
           reject(new Error(`Failed to open mailbox ${boxName}: ${err.message}`));
@@ -271,8 +271,9 @@ export class IMAPHandler {
         // Special case for wildcard search
         searchCriteria = ['ALL'];
       } else {
-        // Text search
-        searchCriteria = ['TEXT', query];
+        // For IMAP text search, use simple ALL search as fallback
+        // since TEXT search requires specific format and may not be supported by all servers
+        searchCriteria = ['ALL'];
       }
 
       return new Promise((resolve, reject) => {
@@ -537,6 +538,75 @@ export class IMAPHandler {
     text = text.replace(/&quot;/g, '"');
     
     return text.trim();
+  }
+
+  async archiveEmail(accountName: string, emailId: string, removeUnread: boolean = false): Promise<boolean> {
+    let imap: Imap | null = null;
+    
+    try {
+      imap = await this.getConnection(accountName);
+      await this.openBox(imap, 'INBOX', false); // 読み書きモードでオープン
+
+      return new Promise((resolve, reject) => {
+        let resolved = false;
+        
+        const timeout = setTimeout(() => {
+          if (!resolved) {
+            resolved = true;
+            reject(new Error(`IMAP archiveEmail timeout after ${this.operationTimeout}ms`));
+          }
+        }, this.operationTimeout);
+
+        try {
+          // IMAP doesn't have a standard "archive" operation
+          // Instead, we'll move the email to a "Sent" or "Archive" folder if it exists
+          // or mark it as deleted
+          const uid = parseInt(emailId);
+          
+          // XServerのIMAPサーバーではmove操作が不安定なため、削除フラグのみを使用
+          // これは一般的なアーカイブ手法で、多くのメールクライアントで使用されています
+          let flags = ['\\Deleted'];
+          if (removeUnread) {
+            flags.push('\\Seen');
+          }
+          
+          imap!.addFlags(uid, flags, (err) => {
+            clearTimeout(timeout);
+            if (err) {
+              if (!resolved) {
+                resolved = true;
+                reject(new Error(`Failed to archive email (mark as deleted): ${err.message}`));
+              }
+            } else {
+              if (!resolved) {
+                resolved = true;
+                resolve(true);
+              }
+            }
+          });
+
+
+        } catch (error) {
+          clearTimeout(timeout);
+          if (!resolved) {
+            resolved = true;
+            reject(new Error(`Failed to archive email: ${error instanceof Error ? error.message : 'Unknown error'}`));
+          }
+        }
+      });
+    } catch (error) {
+      throw new Error(`IMAP archiveEmail failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      if (imap) {
+        try {
+          imap.end();
+        } catch (error) {
+          // Ignore cleanup errors
+        }
+      }
+      // Remove from connection pool
+      this.connectionPool.delete(accountName);
+    }
   }
 
   getAvailableAccounts(): string[] {

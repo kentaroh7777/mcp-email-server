@@ -20,9 +20,8 @@ export declare class IMAPHandler {
     private hasAttachments;
     private extractAttachments;
     private extractTextFromBody;
+    archiveEmail(accountName: string, emailId: string, removeUnread?: boolean): Promise<boolean>;
     getAvailableAccounts(): string[];
-    markAsRead(accountName: string, emailId: string): Promise<boolean>;
-    archiveEmail(accountName: string, emailId: string): Promise<boolean>;
     addXServerAccount(accountName: string, server: string, domain: string, username: string, encryptedPassword: string): void;
 }
 export declare const imapTools: Tool[];

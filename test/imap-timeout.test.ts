@@ -102,14 +102,14 @@ describe('IMAP Tools Timeout Prevention', () => {
     });
   }
 
-  it.skipIf(!getTestAccountName('imap'))('should respond within timeout for list_imap_emails', async () => {
+  it.skipIf(!getTestAccountName('imap'))('should respond within timeout for list_emails', async () => {
     const imapAccount = getTestAccountName('imap')!;
     const command = {
       jsonrpc: '2.0',
       id: 1,
       method: 'tools/call',
       params: {
-        name: 'list_imap_emails',
+        name: 'list_emails',
         arguments: {
           account_name: imapAccount,
           limit: 1
@@ -121,7 +121,7 @@ describe('IMAP Tools Timeout Prevention', () => {
 
     // デバッグ用ログ
     if (!result.success) {
-      console.log('list_imap_emails test failed:', result.error);
+      console.log('list_emails test failed:', result.error);
       console.log('TimedOut:', result.timedOut);
       console.log('Response:', result.response);
     }
@@ -136,16 +136,18 @@ describe('IMAP Tools Timeout Prevention', () => {
     expect(Array.isArray(emails.emails)).toBe(true);
   }, 10000);
 
-  it.skipIf(!getTestAccountName('imap'))('should respond within timeout for get_imap_unread_count', async () => {
+  it.skipIf(!getTestAccountName('imap'))('should respond within timeout for list_emails with unread_only', async () => {
     const imapAccount = getTestAccountName('imap')!;
     const command = {
       jsonrpc: '2.0',
       id: 2,
       method: 'tools/call',
       params: {
-        name: 'get_imap_unread_count',
+        name: 'list_emails',
         arguments: {
-          account_name: imapAccount
+          account_name: imapAccount,
+          unread_only: true,
+          limit: 50
         }
       }
     };
@@ -154,7 +156,7 @@ describe('IMAP Tools Timeout Prevention', () => {
 
     // デバッグ用ログ
     if (!result.success) {
-      console.log('get_imap_unread_count test failed:', result.error);
+      console.log('list_emails with unread_only test failed:', result.error);
       console.log('TimedOut:', result.timedOut);
       console.log('Response:', result.response);
     }
@@ -163,9 +165,11 @@ describe('IMAP Tools Timeout Prevention', () => {
     expect(result.success).toBe(true);
     expect(result.response).toBeDefined();
     
-    const count = JSON.parse(result.response.result.content[0].text);
-    expect(count.count).toBeDefined();
-    expect(typeof count.count).toBe('number');
+    const emailsResult = JSON.parse(result.response.result.content[0].text);
+    expect(emailsResult.emails).toBeDefined();
+    expect(Array.isArray(emailsResult.emails)).toBe(true);
+    expect(emailsResult.unread_count).toBeDefined();
+    expect(typeof emailsResult.unread_count).toBe('number');
   }, 10000);
 
   it('should handle invalid account gracefully', async () => {
@@ -174,7 +178,7 @@ describe('IMAP Tools Timeout Prevention', () => {
       id: 3,
       method: 'tools/call',
       params: {
-        name: 'list_imap_emails',
+        name: 'list_emails',
         arguments: {
           account_name: 'invalid_account',
           limit: 1
@@ -205,7 +209,7 @@ describe('IMAP Tools Timeout Prevention', () => {
         id: 4,
         method: 'tools/call',
         params: {
-          name: 'list_imap_emails',
+          name: 'list_emails',
           arguments: { account_name: imapAccounts[0], limit: 1 }
         }
       },
@@ -214,8 +218,8 @@ describe('IMAP Tools Timeout Prevention', () => {
         id: 5,
         method: 'tools/call',
         params: {
-          name: 'get_imap_unread_count',
-          arguments: { account_name: imapAccounts[1] || imapAccounts[0] }
+          name: 'list_emails',
+          arguments: { account_name: imapAccounts[1] || imapAccounts[0], unread_only: true, limit: 10 }
         }
       }
     ];

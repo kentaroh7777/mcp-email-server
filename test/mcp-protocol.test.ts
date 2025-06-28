@@ -35,26 +35,25 @@ describe('MCP Protocol Tests', () => {
       expect(Array.isArray(response.result.tools)).toBe(true);
       expect(response.result.tools.length).toBeGreaterThan(0);
 
-      // 実際の状態検証: 統合ツールとプロバイダーツールが含まれているか
+      // 実際の状態検証: 統合化されたツールが含まれているか
       const toolNames = response.result.tools.map((tool: any) => tool.name);
       
-      // 統合ツール
+      // アカウント管理ツール
       expect(toolNames).toContain('list_accounts');
       expect(toolNames).toContain('test_connection');
       expect(toolNames).toContain('search_all_emails');
-      expect(toolNames).toContain('get_account_stats');
+      expect(toolNames).toContain('get_account_stats'); // 改良済み: アカウントタイプ情報付き
       
-      // Gmailツール
-      expect(toolNames).toContain('list_emails');
-      expect(toolNames).toContain('search_emails');
-      expect(toolNames).toContain('get_email_detail');
-      // get_unread_count は実際の未読数と異なるため非公開化
+      // 統合化されたメールツール (Gmail + IMAP)
+      expect(toolNames).toContain('list_emails'); // 統合済み
+      expect(toolNames).toContain('search_emails'); // 統合済み
+      expect(toolNames).toContain('get_email_detail'); // 統合済み
+      expect(toolNames).toContain('archive_email'); // 統合済み
       
-      // IMAPツール
-      expect(toolNames).toContain('list_imap_emails');
-      expect(toolNames).toContain('search_imap_emails');
-      expect(toolNames).toContain('get_imap_email_detail');
-      expect(toolNames).toContain('get_imap_unread_count');
+      // 古いIMAPツールは削除されているべき
+      expect(toolNames).not.toContain('list_imap_emails');
+      expect(toolNames).not.toContain('search_imap_emails');
+      expect(toolNames).not.toContain('get_imap_email_detail');
     });
 
     test('各ツールに適切なスキーマが定義されている', async () => {

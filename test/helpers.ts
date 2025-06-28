@@ -53,19 +53,13 @@ export class TestHelper {
   }
 
   async verifyUnreadCount(accountName: string, expectedMinimum: number = 0): Promise<{ valid: boolean; actual: number }> {
-    // アカウントタイプを判定して正しいツールを使用
-    const accounts = this.getConfiguredAccounts();
-    let toolName: string;
+    // 統合ツールを使用
+    const response = await this.callTool('list_emails', { 
+      account_name: accountName,
+      unread_only: true,
+      limit: 1
+    });
     
-    if (accounts.gmail.includes(accountName)) {
-      toolName = 'get_unread_count'; // Gmailツール
-    } else if (accounts.imap.includes(accountName) || accounts.xserver.includes(accountName)) {
-      toolName = 'get_imap_unread_count'; // IMAPツール
-    } else {
-      return { valid: false, actual: -1 };
-    }
-    
-    const response = await this.callTool(toolName, { account_name: accountName });
     if (response.error) {
       return { valid: false, actual: -1 };
     }
@@ -74,10 +68,13 @@ export class TestHelper {
     const data = this.extractMCPData(response);
     let count = -1;
     if (data && typeof data === 'object') {
-      if ('count' in data) {
-        count = data.count;
+      if ('unread_count' in data) {
+        count = data.unread_count;
       } else if ('unreadCount' in data) {
         count = data.unreadCount;
+      } else if ('emails' in data && Array.isArray(data.emails)) {
+        // フォールバック: 実際のメール数から推測
+        count = data.emails.length;
       }
     }
     
@@ -140,8 +137,8 @@ export class TestHelper {
     const xserver: string[] = [];
 
     Object.keys(process.env).forEach(key => {
-      if (key.startsWith('GMAIL_ACCESS_TOKEN_')) {
-        const accountName = key.replace('GMAIL_ACCESS_TOKEN_', '');
+      if (key.startsWith('GMAIL_REFRESH_TOKEN_')) {
+        const accountName = key.replace('GMAIL_REFRESH_TOKEN_', '');
         gmail.push(accountName);
       } else if (key.startsWith('IMAP_HOST_')) {
         const accountName = key.replace('IMAP_HOST_', '');

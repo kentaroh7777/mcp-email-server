@@ -33,14 +33,13 @@ export class GmailHandler {
         return 'Asia/Tokyo';
     }
     loadGmailConfigs() {
-        // First try the new format (GMAIL_ACCESS_TOKEN_accountname)
-        const gmailTokenKeys = Object.keys(process.env).filter(key => key.startsWith('GMAIL_ACCESS_TOKEN_'));
+        // Load Gmail accounts using refresh tokens
+        const gmailRefreshKeys = Object.keys(process.env).filter(key => key.startsWith('GMAIL_REFRESH_TOKEN_'));
         const clientId = process.env.GMAIL_CLIENT_ID;
         const clientSecret = process.env.GMAIL_CLIENT_SECRET;
-        for (const tokenKey of gmailTokenKeys) {
-            const accountName = tokenKey.replace('GMAIL_ACCESS_TOKEN_', '');
-            const refreshTokenKey = `GMAIL_REFRESH_TOKEN_${accountName}`;
-            const refreshToken = process.env[refreshTokenKey];
+        for (const refreshKey of gmailRefreshKeys) {
+            const accountName = refreshKey.replace('GMAIL_REFRESH_TOKEN_', '');
+            const refreshToken = process.env[refreshKey];
             if (clientId && clientSecret && refreshToken) {
                 this.configs.set(accountName, {
                     clientId,
@@ -107,8 +106,17 @@ export class GmailHandler {
             let query = '';
             if (params.unread_only)
                 query += 'is:unread ';
-            if (params.folder && params.folder !== 'INBOX') {
-                query += `label:${params.folder} `;
+            if (params.folder) {
+                if (params.folder === 'INBOX') {
+                    query += 'in:inbox ';
+                }
+                else {
+                    query += `label:${params.folder} `;
+                }
+            }
+            else {
+                // デフォルトはINBOX
+                query += 'in:inbox ';
             }
             // Apply environmental limits for email content fetching
             const maxLimit = parseInt(process.env.MAX_EMAIL_CONTENT_LIMIT || '50');
@@ -260,40 +268,6 @@ export class GmailHandler {
     getAvailableAccounts() {
         return Array.from(this.configs.keys());
     }
-    // 新機能: メールを既読にする
-    async markAsRead(accountName, emailId) {
-        try {
-            const gmail = await this.authenticate(accountName);
-            await gmail.users.messages.modify({
-                userId: 'me',
-                id: emailId,
-                requestBody: {
-                    removeLabelIds: ['UNREAD']
-                }
-            });
-            return true;
-        }
-        catch (error) {
-            throw new Error(`Failed to mark email as read for ${accountName}: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        }
-    }
-    // 新機能: メールをアーカイブする
-    async archiveEmail(accountName, emailId) {
-        try {
-            const gmail = await this.authenticate(accountName);
-            await gmail.users.messages.modify({
-                userId: 'me',
-                id: emailId,
-                requestBody: {
-                    removeLabelIds: ['INBOX']
-                }
-            });
-            return true;
-        }
-        catch (error) {
-            throw new Error(`Failed to archive email for ${accountName}: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        }
-    }
     parseDateTime(dateTimeInput) {
         // Unix timestamp（秒）で指定された場合はそのまま使用
         if (/^\d+$/.test(dateTimeInput)) {
@@ -399,6 +373,75 @@ export class GmailHandler {
             extractFromParts(payload.parts);
         }
         return attachments;
+    }
+    async archiveEmail(accountName, emailId, removeUnread = false) {
+        try {
+            const gmail = await this.authenticate(accountName);
+            // デバッグ: アーカイブ前のメール状態を確認
+            const beforeModify = await gmail.users.messages.get({
+                userId: 'me',
+                id: emailId,
+                format: 'minimal'
+            });
+            const beforeLabels = beforeModify.data.labelIds || [];
+            console.log(`[DEBUG] アーカイブ前のラベル: ${beforeLabels.join(', ')}`);
+            // Step 1: INBOXラベルがない場合は追加
+            if (!beforeLabels.includes('INBOX')) {
+                console.log(`[DEBUG] INBOXラベルを追加...`);
+                await gmail.users.messages.modify({
+                    userId: 'me',
+                    id: emailId,
+                    requestBody: {
+                        addLabelIds: ['INBOX']
+                    }
+                });
+                console.log(`[DEBUG] INBOXラベル追加完了`);
+            }
+            // Step 2: アーカイブ対象のラベルを特定
+            const labelsToRemove = ['INBOX']; // INBOXは必ず削除
+            // すべてのカテゴリラベルを削除対象に追加
+            const categoryLabels = beforeLabels.filter(label => label.startsWith('CATEGORY_'));
+            labelsToRemove.push(...categoryLabels);
+            // UNREADラベルの削除オプション
+            if (removeUnread && beforeLabels.includes('UNREAD')) {
+                labelsToRemove.push('UNREAD');
+                console.log(`[DEBUG] UNREADラベルも削除対象に追加`);
+            }
+            console.log(`[DEBUG] 削除対象ラベル: ${labelsToRemove.join(', ')}`);
+            // Step 3: ラベル削除
+            console.log(`[DEBUG] ラベル削除中...`);
+            await gmail.users.messages.modify({
+                userId: 'me',
+                id: emailId,
+                requestBody: {
+                    removeLabelIds: labelsToRemove
+                }
+            });
+            console.log(`[DEBUG] ラベル削除完了`);
+            // Step 4: CATEGORY_PERSONALを追加（アーカイブ状態を維持）
+            console.log(`[DEBUG] CATEGORY_PERSONALを追加してアーカイブ状態に...`);
+            await gmail.users.messages.modify({
+                userId: 'me',
+                id: emailId,
+                requestBody: {
+                    addLabelIds: ['CATEGORY_PERSONAL']
+                }
+            });
+            console.log(`[DEBUG] CATEGORY_PERSONAL追加完了`);
+            // デバッグ: アーカイブ後のメール状態を確認
+            const afterModify = await gmail.users.messages.get({
+                userId: 'me',
+                id: emailId,
+                format: 'minimal'
+            });
+            console.log(`[DEBUG] アーカイブ後のラベル: ${afterModify.data.labelIds?.join(', ')}`);
+            console.log(`[DEBUG] Gmail API レスポンス完了`);
+            return true;
+        }
+        catch (error) {
+            console.log(`[DEBUG] Archive error:`, error);
+            throw new Error(`Failed to archive email for ${accountName}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
     }
 }
 export const gmailTools = [

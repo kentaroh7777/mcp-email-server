@@ -8,8 +8,8 @@ export default defineConfig({
     hookTimeout: 30000,
     teardownTimeout: 30000,
     setupFiles: ['./test/setup.ts'],
-    include: ['test/**/*.test.ts'],
-    exclude: ['test/**/*.js', 'node_modules/**', 'dist/**']
+    include: ['test/**/*.test.ts', 'test/**/*.test.js'],
+    exclude: ['node_modules/**', 'dist/**']
   },
   resolve: {
     alias: {
