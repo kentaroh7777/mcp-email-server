@@ -1,7 +1,13 @@
 import * as readline from 'readline';
 import * as dotenv from 'dotenv';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 import { MCPEmailProtocolHandler } from './mcp-handler.js';
-dotenv.config();
+// 現在のファイルの場所から相対的に.envファイルを見つける
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const envPath = join(__dirname, '..', '.env');
+dotenv.config({ path: envPath });
 export class MCPEmailServer {
     constructor() {
         this.handler = new MCPEmailProtocolHandler();

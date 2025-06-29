@@ -164,6 +164,66 @@ npm run health:check
 
 このアーキテクチャにより、MCP制約内で最高のユーザーエクスペリエンスを提供しながら、信頼性、パフォーマンス、保守性を確保しています。
 
+## 🔧 重要な技術的注意事項
+
+### .env読み込みの問題と解決策
+
+#### 問題
+ビルドされたJavaScriptファイル（`dist/index.js`）を使用すると、以下の問題が発生する可能性があります：
+
+- **作業ディレクトリの問題**: CursorのMCPサーバーがルートディレクトリ（`/`）で起動される
+- **.env読み込み失敗**: 相対パスでの`.env`ファイル参照が失敗
+- **アカウント認識不能**: 環境変数が読み込まれず、全アカウントが「設定されていない」状態になる
+
+#### 解決策
+**TypeScript直接実行**を使用することで、これらの問題を完全に解決できます：
+
+```json
+{
+  "mcpServers": {
+    "mcp-email-server": {
+      "command": "npx",
+      "args": ["tsx", "src/index.ts"],
+      "cwd": "/path/to/mcp-email-server",  // 重要: 作業ディレクトリの指定
+      "env": {
+        "EMAIL_ENCRYPTION_KEY": "your-encryption-key"
+      }
+    }
+  }
+}
+```
+
+#### 技術的詳細
+- **ESモジュールのメタ情報**: `import.meta.url`を使用した確実なファイルパス取得
+- **相対パス解決**: 実行ファイルの場所から相対的に`.env`ファイルを読み込み
+- **作業ディレクトリ独立**: `cwd`設定により確実なプロジェクトルート参照
+
+### 暗号化キーの一致確保
+
+アカウント認識の問題の多くは、暗号化キーの不一致が原因です：
+
+```bash
+# .envファイルの暗号化キー確認
+grep EMAIL_ENCRYPTION_KEY .env
+
+# CursorのMCP設定の暗号化キー確認
+cat ~/.cursor/mcp.json | grep EMAIL_ENCRYPTION_KEY
+```
+
+両方のキーが**完全に一致**している必要があります。
+
+### 依存関係の確認
+
+TypeScript直接実行には以下が必要です：
+
+```bash
+# tsx の確認・インストール
+npx tsx --version || npm install tsx
+
+# 必要なTypeScript依存関係
+npm install @types/node typescript
+```
+
 ## クイックスタート
 
 ### 1. インストール
@@ -194,23 +254,320 @@ npm run test:quick
 npm run health:check
 ```
 
-### 4. Cursor連携
+### 4. 依存関係の確認
 
-CursorのMCP設定に追加します：
+TypeScript直接実行に必要なパッケージを確認・インストール：
+
+```bash
+# tsx の確認・インストール
+npx tsx --version || npm install tsx
+
+# TypeScript関連の依存関係確認
+npm install @types/node typescript
+```
+
+### 5. MCP設定
+
+CursorのMCP設定ファイル（`~/.cursor/mcp.json`）にサーバーを追加します。
+
+**推奨設定（TypeScript直接実行）**:
+```json
+{
+  "mcpServers": {
+    "mcp-email-server": {
+      "command": "npx",
+      "args": ["tsx", "src/index.ts"],
+      "cwd": "/your/path/to/mcp-email-server",
+      "env": {
+        "EMAIL_ENCRYPTION_KEY": "your-unique-encryption-key"
+      }
+    }
+  }
+}
+```
+
+## 🔧 MCP設定ガイド
+
+### 設定ファイルの場所
+
+- **macOS/Linux**: `~/.cursor/mcp.json`
+- **Windows**: `%USERPROFILE%\.cursor\mcp.json`
+
+### 基本設定
+
+CursorのMCP設定ファイルに以下を追加：
+
+#### 推奨設定（TypeScript直接実行）
 
 ```json
 {
   "mcpServers": {
     "mcp-email-server": {
-      "command": "/Users/taroken/.nvm/versions/node/v23.7.0/bin/tsx",
-      "args": ["/Users/taroken/src/git/mcp-email-server/run-email-server.ts"],
-      "cwd": "/Users/taroken/src/git/mcp-email-server",
+      "command": "npx",
+      "args": ["tsx", "src/index.ts"],
+      "cwd": "/path/to/mcp-email-server",
       "env": {
-        "NODE_ENV": "production"
+        "EMAIL_ENCRYPTION_KEY": "your-unique-encryption-key-here",
+        "NODE_ENV": "development",
+        "DEBUG": "false"
       }
     }
   }
 }
+```
+
+#### レガシー設定（JavaScript実行）
+
+⚠️ **注意**: ビルドされたJavaScriptファイルでは.env読み込みに問題がある場合があります。TypeScript直接実行を推奨。
+
+```json
+{
+  "mcpServers": {
+    "mcp-email-server": {
+      "command": "node",
+      "args": ["dist/index.js"],
+      "cwd": "/path/to/mcp-email-server",
+      "env": {
+        "EMAIL_ENCRYPTION_KEY": "your-unique-encryption-key-here",
+        "NODE_ENV": "development",
+        "DEBUG": "false"
+      }
+    }
+  }
+}
+```
+
+### 環境別設定例
+
+#### 開発環境（最小設定・推奨）
+
+```json
+{
+  "mcpServers": {
+    "mcp-email-server": {
+      "command": "npx",
+      "args": ["tsx", "src/index.ts"],
+      "cwd": "/Users/your-username/path/to/mcp-email-server",
+      "env": {
+        "EMAIL_ENCRYPTION_KEY": "mcp-email-server-development-key-2025"
+      }
+    }
+  }
+}
+```
+
+#### 本格運用設定（推奨）
+
+```json
+{
+  "mcpServers": {
+    "mcp-email-server": {
+      "command": "npx",
+      "args": ["tsx", "src/index.ts"],
+      "cwd": "/Users/your-username/path/to/mcp-email-server",
+      "env": {
+        "EMAIL_ENCRYPTION_KEY": "your-strong-encryption-key",
+        "NODE_ENV": "production",
+        "DEBUG": "false",
+        "GMAIL_TIMEOUT_MS": "60000",
+        "IMAP_CONNECTION_TIMEOUT_MS": "30000",
+        "IMAP_OPERATION_TIMEOUT_MS": "60000",
+        "EMAIL_DEFAULT_TIMEZONE": "Asia/Tokyo"
+      }
+    }
+  }
+}
+```
+
+### 設定手順
+
+1. **パスの確認**:
+   ```bash
+   pwd
+   # /Users/your-username/path/to/mcp-email-server
+   ```
+
+2. **ビルド確認**:
+   ```bash
+   ls -la dist/index.js
+   # -rw-r--r--  1 user  staff  3200 Dec 29 10:00 dist/index.js
+   ```
+
+3. **MCP設定ファイル編集**:
+   ```bash
+   # macOS/Linux
+   nano ~/.cursor/mcp.json
+   
+   # Windows
+   notepad %USERPROFILE%\.cursor\mcp.json
+   ```
+
+4. **Cursor再起動**: 設定反映のためCursorを再起動
+
+5. **動作確認**: MCPツールが利用可能になったことを確認
+
+### 設定のポイント
+
+- **cwd（作業ディレクトリ）**: プロジェクトルートの指定が必要（.env読み込みのため）
+- **TypeScript直接実行**: `npx tsx src/index.ts`を推奨（ビルド不要、確実な.env読み込み）
+- **暗号化キー**: 他のプロジェクトと重複しない一意のキーを使用
+- **環境変数**: 必要最小限は`EMAIL_ENCRYPTION_KEY`のみ
+- **tsx依存**: TypeScript実行に必要（`npm install tsx`でインストール）
+
+### トラブルシューティング
+
+#### サーバーが起動しない場合
+
+1. **プロジェクトパスの確認**:
+   ```bash
+   # プロジェクトディレクトリの確認
+   ls -la /path/to/mcp-email-server/src/index.ts
+   ```
+
+2. **Node.js/tsx確認**:
+   ```bash
+   node --version  # v18.0.0以上が必要
+   npx tsx --version  # tsxがインストールされているか確認
+   ```
+
+3. **手動テスト（推奨）**:
+   ```bash
+   cd /path/to/mcp-email-server
+   npx tsx src/index.ts
+   ```
+
+4. **環境変数確認**:
+   ```bash
+   # .envファイルの存在確認
+   ls -la .env
+   # 暗号化キーの設定確認
+   cat .env | grep EMAIL_ENCRYPTION_KEY
+   ```
+
+#### よくあるエラー
+
+- **`.env not found`**: 作業ディレクトリ（cwd）が正しく設定されていない
+- **`tsx command not found`**: `npm install tsx`または`npm install -g tsx`でインストール
+- **`Cannot find module`**: TypeScript/tsxパッケージの依存関係問題
+- **`Encryption key required`**: `EMAIL_ENCRYPTION_KEY`環境変数を設定
+- **アカウント認識エラー**: 暗号化キーの不一致、.env読み込み失敗が原因
+
+### 設定検証
+
+#### MCP接続確認
+
+Cursor上でMCPツールが正常に利用できるか確認：
+
+1. **Cursorのコマンドパレット**を開く（Cmd+Shift+P / Ctrl+Shift+P）
+2. 「MCP」で検索
+3. MCP関連のコマンドが表示されるか確認
+
+#### 基本動作テスト
+
+以下のコマンドでMCPサーバーの基本機能をテスト：
+
+```javascript
+// アカウント一覧の確認
+mcp_mcp-email-server_list_accounts()
+
+// アカウント統計の確認
+mcp_mcp-email-server_get_account_stats()
+
+// 存在しないアカウントでのエラーハンドリング確認
+mcp_mcp-email-server_test_connection("nonexistent_account")
+```
+
+期待される結果：
+- **正常起動**: エラーなしで応答
+- **適切なエラー**: 存在しないアカウントで適切なエラーメッセージ
+- **空の結果**: アカウント未設定時は空の配列を返却
+
+### 実用的な設定例
+
+#### 個人利用（Gmail のみ・推奨）
+
+```json
+{
+  "mcpServers": {
+    "mcp-email-server": {
+      "command": "npx",
+      "args": ["tsx", "src/index.ts"],
+      "cwd": "/Users/username/projects/mcp-email-server",
+      "env": {
+        "EMAIL_ENCRYPTION_KEY": "personal-gmail-mcp-2025"
+      }
+    }
+  }
+}
+```
+
+#### ビジネス利用（Gmail + IMAP・推奨）
+
+```json
+{
+  "mcpServers": {
+    "mcp-email-server": {
+      "command": "npx",
+      "args": ["tsx", "src/index.ts"],
+      "cwd": "/Users/username/projects/mcp-email-server",
+      "env": {
+        "EMAIL_ENCRYPTION_KEY": "business-email-mcp-secure-key-2025",
+        "NODE_ENV": "production",
+        "GMAIL_TIMEOUT_MS": "45000",
+        "IMAP_CONNECTION_TIMEOUT_MS": "20000",
+        "EMAIL_DEFAULT_TIMEZONE": "Asia/Tokyo"
+      }
+    }
+  }
+}
+```
+
+### アカウント設定後の利用例
+
+メールアカウントを設定した後の実用的な使用例：
+
+#### 横断検索
+
+```javascript
+// 全アカウントからキーワード検索
+mcp_mcp-email-server_search_all_emails({
+  query: "請求書",
+  limit: 20,
+  accounts: "ALL"
+})
+```
+
+#### アカウント管理
+
+```javascript
+// 全アカウントの状態確認
+mcp_mcp-email-server_list_accounts()
+
+// 特定アカウントの接続テスト
+mcp_mcp-email-server_test_connection("business_gmail")
+```
+
+#### 統計情報取得
+
+```javascript
+// 全アカウントの統計情報
+mcp_mcp-email-server_get_account_stats()
+```
+
+### セキュリティ考慮事項
+
+1. **暗号化キー管理**:
+   - 他のプロジェクトと異なるキーを使用
+   - 定期的な更新を推奨
+   - 本番環境では強力なランダムキーを生成
+
+2. **MCP設定ファイル**:
+   - `.cursor/mcp.json`は通常バージョン管理対象外
+   - パスワードなどの機密情報は環境変数で管理
+
+3. **権限最小化**:
+   - 必要最小限の権限でNode.jsプロセスを実行
+   - 不要な環境変数は設定しない
 ```
 
 ## Configuration
@@ -358,6 +715,8 @@ EMAIL_DEFAULT_TIMEZONE=Europe/London
 - **`test_connection`**: Test connection to specific account
 - **`search_all_emails`**: Search across all Gmail/IMAP accounts
 - **`get_account_stats`**: Get statistics for all accounts
+- **`send_email`**: Send emails from Gmail or IMAP accounts (auto-detects account type)
+- **`archive_email`**: Archive emails (Gmail) or move to archive folder (IMAP)
 
 ### Gmail Tools
 
@@ -446,6 +805,70 @@ gtimeout 10s bash -c 'echo "..." | npx tsx run-email-server.ts && echo "COMMAND_
 {
   "tool": "get_account_stats",
   "arguments": {}
+}
+```
+
+### Email Sending
+
+```javascript
+// Send simple email
+{
+  "tool": "send_email",
+  "arguments": {
+    "account_name": "business_gmail",
+    "to": "recipient@example.com",
+    "subject": "Meeting Schedule",
+    "text": "Hi, let's schedule our meeting for next week."
+  }
+}
+
+// Send HTML email with CC/BCC
+{
+  "tool": "send_email",
+  "arguments": {
+    "account_name": "business_gmail",
+    "to": ["recipient1@example.com", "recipient2@example.com"],
+    "cc": "manager@example.com",
+    "bcc": "archive@example.com",
+    "subject": "Project Update",
+    "html": "<h1>Project Status</h1><p>Current progress: <strong>80%</strong></p>",
+    "text": "Project Status\nCurrent progress: 80%"
+  }
+}
+
+// Reply to existing email
+{
+  "tool": "send_email",
+  "arguments": {
+    "account_name": "business_gmail",
+    "to": "original_sender@example.com",
+    "subject": "Re: Original Subject",
+    "text": "Thank you for your message. I'll get back to you soon.",
+    "in_reply_to": "original-message-id@gmail.com",
+    "references": ["thread-ref-1@gmail.com", "thread-ref-2@gmail.com"]
+  }
+}
+```
+
+### Email Archiving
+
+```javascript
+// Archive single email
+{
+  "tool": "archive_email",
+  "arguments": {
+    "account_name": "business_gmail",
+    "email_id": "email_id_here"
+  }
+}
+
+// Archive multiple emails
+{
+  "tool": "archive_email",
+  "arguments": {
+    "account_name": "business_gmail",
+    "email_id": ["email_id_1", "email_id_2", "email_id_3"]
+  }
 }
 ```
 
