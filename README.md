@@ -618,21 +618,85 @@ IMAP_OPERATION_TIMEOUT_MS=60000
 EMAIL_DEFAULT_TIMEZONE=Asia/Tokyo
 ```
 
-### Gmail Setup
+### Gmail設定
 
-1. **Create Google Cloud Project**:
-   - Go to [Google Cloud Console](https://console.cloud.google.com/)
-   - Create a new project or select existing one
-   - Enable Gmail API
+1. **Google Cloud プロジェクトの作成**:
+   - [Google Cloud Console](https://console.cloud.google.com/)にアクセス
+   - 新しいプロジェクトを作成または既存のプロジェクトを選択
+   - Gmail APIを有効化
 
-2. **Configure OAuth2**:
-   - Go to "Credentials" → "Create Credentials" → "OAuth 2.0 Client IDs"
-   - Application type: "Desktop application"
-   - Note the Client ID and Client Secret
+2. **OAuth2の設定**:
+   - 「認証情報」 → 「認証情報を作成」 → 「OAuth 2.0 クライアント ID」
+   - アプリケーションの種類: 「デスクトップアプリケーション」
+   - クライアントIDとクライアントシークレットをメモ
 
-3. **Get Access Tokens**:
-   - Run the OAuth2 flow to get access and refresh tokens
-   - Store tokens in environment variables
+3. **アクセストークンの取得**:
+   - 自動化されたトークン管理ツールを使用（推奨）
+   - トークンを環境変数に保存
+
+### Gmailトークン管理
+
+`tools/refresh-gmail-tokens.js`スクリプトで自動化されたトークン管理が可能です：
+
+#### **クイックスタート**
+```bash
+# 全Gmailアカウントの状態確認
+node tools/refresh-gmail-tokens.js --check-all
+
+# 特定アカウントのトークン更新
+node tools/refresh-gmail-tokens.js <アカウント名>
+
+# 対話式モード
+node tools/refresh-gmail-tokens.js
+```
+
+#### **使用例**
+
+1. **トークン状態の確認**:
+   ```bash
+   node tools/refresh-gmail-tokens.js --check-all
+   ```
+   出力例:
+   ```
+   📊 チェック結果:
+   ✅ 有効: 4/4
+   ❌ 無効: 0/4
+   ```
+
+2. **期限切れトークンの更新**:
+   ```bash
+   node tools/refresh-gmail-tokens.js kentaroh7
+   ```
+   - OAuth2 URLが表示されます
+   - リダイレクト後のURL全体を貼り付け（自動でコード抽出）
+   - .envファイルが自動更新されます
+
+3. **新規アカウント追加**:
+   ```bash
+   node tools/refresh-gmail-tokens.js
+   # オプション3を選択: "新規アカウント追加"
+   ```
+
+#### **機能**
+
+- **自動コード抽出**: リダイレクトURL全体を貼り付けるだけで認証コードを自動抽出
+- **トークン検証**: 更新前に既存トークンの有効性をテスト
+- **一括状態確認**: 設定済み全アカウントを一度にチェック
+- **自動.env更新**: 環境変数を自動的に更新
+- **エラー検出**: `invalid_grant`などのOAuth2エラーを識別
+
+#### **トラブルシューティング**
+
+`invalid_grant`エラーが表示された場合:
+```bash
+🔄 再認証が必要なアカウント:
+  - kentaroh7
+  - kabucoh
+
+再認証するには: node tools/refresh-gmail-tokens.js <account_name>
+```
+
+提案されたコマンドを実行してトークンを更新してください。
 
 ### IMAP Setup
 
