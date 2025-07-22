@@ -1,10 +1,13 @@
 import { google, gmail_v1 } from 'googleapis';
 import { GmailConfig, EmailMessage, EmailDetail, ListEmailsParams, Tool, SendEmailParams, SendEmailResult } from './types.js';
+import * as dotenv from 'dotenv';
 
 export class GmailHandler {
   private configs: Map<string, any> = new Map();
 
   constructor() {
+    // 環境変数を確実に読み込み
+    dotenv.config();
     this.loadGmailConfigs();
   }
 

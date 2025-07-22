@@ -1,5 +1,5 @@
 import { MCPRequest, MCPResponse, MCPError, InitializeResult } from './types.js';
-import { SimpleGmailHandler } from './gmail-simple.js';
+import { GmailHandler } from './gmail.js';
 import { IMAPHandler } from './imap.js';
 
 interface ValidationResult {
@@ -8,12 +8,12 @@ interface ValidationResult {
 }
 
 export class MCPEmailProtocolHandler {
-  private gmailHandler: SimpleGmailHandler;
+  private gmailHandler: GmailHandler;
   private imapHandler: IMAPHandler;
   private encryptionKey: string;
 
   constructor(encryptionKey?: string) {
-    this.gmailHandler = new SimpleGmailHandler();
+    this.gmailHandler = new GmailHandler();
     this.encryptionKey = encryptionKey || process.env.EMAIL_ENCRYPTION_KEY || 'default-key';
     this.imapHandler = new IMAPHandler(this.encryptionKey);
   }
@@ -405,9 +405,7 @@ export class MCPEmailProtocolHandler {
         const emails = await this.gmailHandler.searchEmails(
           actualAccountName, 
           args.query, 
-          args.limit || 20, 
-          args.date_after, 
-          args.date_before
+          args.limit || 20
         );
         return this.createResponse(requestId, { emails });
       } else {
