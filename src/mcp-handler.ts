@@ -1,5 +1,5 @@
 import { MCPRequest, MCPResponse, MCPError, InitializeResult } from './types.js';
-import { GmailHandler } from './gmail.js';
+import { SimpleGmailHandler } from './gmail-simple.js';
 import { IMAPHandler } from './imap.js';
 
 interface ValidationResult {
@@ -8,12 +8,12 @@ interface ValidationResult {
 }
 
 export class MCPEmailProtocolHandler {
-  private gmailHandler: GmailHandler;
+  private gmailHandler: SimpleGmailHandler;
   private imapHandler: IMAPHandler;
   private encryptionKey: string;
 
   constructor(encryptionKey?: string) {
-    this.gmailHandler = new GmailHandler();
+    this.gmailHandler = new SimpleGmailHandler();
     this.encryptionKey = encryptionKey || process.env.EMAIL_ENCRYPTION_KEY || 'default-key';
     this.imapHandler = new IMAPHandler(this.encryptionKey);
   }
@@ -316,8 +316,10 @@ export class MCPEmailProtocolHandler {
   // 統合化されたメールツールハンドラー
   private async handleListEmails(args: any, requestId: any): Promise<MCPResponse> {
     try {
+      console.log(`[MCP-DEBUG] handleListEmails開始: ${args.account_name}`);
       // 必須パラメータチェック
       if (!args.account_name) {
+        console.log(`[MCP-ERROR] account_nameが未指定`);
         return this.createErrorResponse(requestId, {
           code: -32602,
           message: 'account_name is required'
@@ -325,11 +327,18 @@ export class MCPEmailProtocolHandler {
       }
 
       const accountType = this.getAccountType(args.account_name);
+      console.log(`[MCP-DEBUG] アカウントタイプ判定: ${args.account_name} -> ${accountType}`);
       
       if (accountType === 'gmail') {
       const actualAccountName = this.mapGmailAccountName(args.account_name);
+      console.log(`[MCP-DEBUG] Gmailアカウント名マッピング: ${args.account_name} -> ${actualAccountName}`);
+      console.log(`[MCP-DEBUG] gmailHandler.listEmails呼び出し開始: ${actualAccountName}`);
       const emails = await this.gmailHandler.listEmails(actualAccountName, args);
-        return this.createResponse(requestId, { emails });
+      console.log(`[MCP-DEBUG] gmailHandler.listEmails完了: ${emails.length}件取得`);
+      console.log(`[MCP-DEBUG] MCPレスポンス作成開始`);
+      const response = this.createResponse(requestId, { emails });
+      console.log(`[MCP-DEBUG] MCPレスポンス作成完了`);
+        return response;
       } else {
         // IMAP
         const emails = await this.imapHandler.listEmails(args.account_name, args);
@@ -350,9 +359,31 @@ export class MCPEmailProtocolHandler {
         return this.createResponse(requestId, { emails, unread_count });
       }
     } catch (error) {
+      // Gmail認証エラーを詳細に分類してMCPレスポンスを作成
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      
+      // 認証関連エラーの判定
+      if (errorMessage.includes('Gmail認証エラー:') || errorMessage.includes('Gmail接続エラー:') || 
+          errorMessage.includes('Gmail API制限エラー:') || errorMessage.includes('Gmail権限エラー:') ||
+          errorMessage.includes('Gmailアカウントエラー:')) {
+        return this.createErrorResponse(requestId, {
+          code: -32001, // カスタム認証エラーコード
+          message: errorMessage
+        });
+      }
+      
+      // アカウント設定エラー
+      if (errorMessage.includes('not configured')) {
+        return this.createErrorResponse(requestId, {
+          code: -32602,
+          message: `Gmail account '${args.account_name}' is not configured. Please set up GMAIL_REFRESH_TOKEN_${args.account_name} in your .env file.`
+        });
+      }
+      
+      // 一般的なエラー
       return this.createErrorResponse(requestId, {
-        code: -32602,
-        message: `Account not found: ${args.account_name}`
+        code: -32603,
+        message: `Failed to list emails for account '${args.account_name}': ${errorMessage}`
       });
     }
   }
@@ -389,9 +420,31 @@ export class MCPEmailProtocolHandler {
         return this.createResponse(requestId, { emails });
       }
     } catch (error) {
+      // Gmail認証エラーを詳細に分類してMCPレスポンスを作成
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      
+      // 認証関連エラーの判定
+      if (errorMessage.includes('Gmail認証エラー:') || errorMessage.includes('Gmail接続エラー:') || 
+          errorMessage.includes('Gmail API制限エラー:') || errorMessage.includes('Gmail権限エラー:') ||
+          errorMessage.includes('Gmailアカウントエラー:')) {
+        return this.createErrorResponse(requestId, {
+          code: -32001, // カスタム認証エラーコード
+          message: errorMessage
+        });
+      }
+      
+      // アカウント設定エラー
+      if (errorMessage.includes('not configured')) {
+        return this.createErrorResponse(requestId, {
+          code: -32602,
+          message: `Gmail account '${args.account_name}' is not configured. Please set up GMAIL_REFRESH_TOKEN_${args.account_name} in your .env file.`
+        });
+      }
+      
+      // 一般的なエラー
       return this.createErrorResponse(requestId, {
-        code: -32602,
-        message: `Account not found: ${args.account_name}`
+        code: -32603,
+        message: `Failed to search emails for account '${args.account_name}': ${errorMessage}`
       });
     }
   }
@@ -604,10 +657,12 @@ export class MCPEmailProtocolHandler {
 
       if (accountType === 'gmail') {
         const actualAccountName = this.mapGmailAccountName(args.account_name);
-        // Gmail connection test - try to list a small number of emails
+        // Gmail connection test - use the dedicated testConnection method
         try {
-          await this.gmailHandler.listEmails(actualAccountName, { limit: 1 });
-          result = { status: 'connected', accountType: 'gmail', account: actualAccountName };
+          const isConnected = await this.gmailHandler.testConnection(actualAccountName);
+          result = isConnected 
+            ? { status: 'connected', accountType: 'gmail', account: actualAccountName }
+            : { status: 'failed', accountType: 'gmail', account: actualAccountName, error: 'Connection test failed' };
         } catch (error) {
           result = { status: 'failed', accountType: 'gmail', account: actualAccountName, error: error instanceof Error ? error.message : 'Unknown error' };
         }
@@ -623,9 +678,31 @@ export class MCPEmailProtocolHandler {
       
       return this.createResponse(requestId, result);
     } catch (error) {
+      // Gmail認証エラーを詳細に分類してMCPレスポンスを作成
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      
+      // 認証関連エラーの判定
+      if (errorMessage.includes('Gmail認証エラー:') || errorMessage.includes('Gmail接続エラー:') || 
+          errorMessage.includes('Gmail API制限エラー:') || errorMessage.includes('Gmail権限エラー:') ||
+          errorMessage.includes('Gmailアカウントエラー:')) {
+        return this.createErrorResponse(requestId, {
+          code: -32001, // カスタム認証エラーコード
+          message: errorMessage
+        });
+      }
+      
+      // アカウント設定エラー
+      if (errorMessage.includes('not configured')) {
+        return this.createErrorResponse(requestId, {
+          code: -32602,
+          message: `Gmail account '${args.account_name}' is not configured. Please set up GMAIL_REFRESH_TOKEN_${args.account_name} in your .env file.`
+        });
+      }
+      
+      // 一般的なエラー
       return this.createErrorResponse(requestId, {
-        code: -32602,
-        message: `Account not found: ${args.account_name}`
+        code: -32603,
+        message: `Failed to test connection for account '${args.account_name}': ${errorMessage}`
       });
     }
   }

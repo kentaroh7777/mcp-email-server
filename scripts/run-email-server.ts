@@ -8,12 +8,12 @@ import { dirname, join } from 'path';
 // プロジェクトルートの.envファイルを読み込み
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const envPath = join(__dirname, '.env');
+const envPath = join(dirname(__dirname), '.env');
 
 dotenv.config({ path: envPath });
 
-import { MCPEmailProtocolHandler } from './src/mcp-handler.js';
-import { setupProductionLogging, logToFile, outputMCPResponse } from './src/file-logger.js';
+import { MCPEmailProtocolHandler } from '../src/mcp-handler.js';
+import { setupProductionLogging, logToFile, outputMCPResponse } from '../src/file-logger.js';
 import * as readline from 'readline';
 
 // 本番環境でのログ設定

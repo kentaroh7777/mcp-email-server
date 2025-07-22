@@ -93,11 +93,28 @@ export class GmailHandler {
         });
         // Test the connection immediately with a simple call
         try {
-            await gmail.users.getProfile({ userId: 'me' });
+            // タイムアウト付きで認証テスト実行（テスト用に5秒に短縮）
+            const timeoutPromise = new Promise((_, reject) => {
+                setTimeout(() => {
+                    reject(new Error('Gmail authentication timeout'));
+                }, 5000); // テスト用に5秒に短縮
+            });
+            const profilePromise = gmail.users.getProfile({ userId: 'me' });
+            await Promise.race([profilePromise, timeoutPromise]);
             return gmail;
         }
         catch (error) {
-            throw new Error(`Gmail authentication failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+            // 具体的なエラー種別を判定
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            if (errorMessage.includes('invalid_grant')) {
+                throw new Error(`Gmail refresh token expired for ${accountName}. Please run token refresh script.`);
+            }
+            else if (errorMessage.includes('timeout')) {
+                throw new Error(`Gmail authentication timeout for ${accountName}. Check network connectivity.`);
+            }
+            else {
+                throw new Error(`Gmail authentication failed for ${accountName}: ${errorMessage}`);
+            }
         }
     }
     async listEmails(accountName, params) {

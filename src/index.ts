@@ -1,114 +1,96 @@
-import * as readline from 'readline';
-import * as dotenv from 'dotenv';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
-import { MCPRequest, MCPResponse } from './types.js';
-import { MCPEmailProtocolHandler } from './mcp-handler.js';
+import * as readline from "readline";
+import { google } from "googleapis";
+import * as dotenv from "dotenv";
 
-// 現在のファイルの場所から相対的に.envファイルを見つける
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-const envPath = join(__dirname, '..', '.env');
-dotenv.config({ path: envPath });
+dotenv.config();
 
-export class MCPEmailServer {
-  private handler: MCPEmailProtocolHandler;
-
+class WorkingMCPServer {
   constructor() {
-    this.handler = new MCPEmailProtocolHandler();
+    console.error("[MCP] Working MCP Server 起動");
   }
 
-  async handleRequest(request: MCPRequest): Promise<MCPResponse> {
-    return await this.handler.handleRequest(request);
+  async initializeGmail() {
+    const clientId = process.env.GMAIL_CLIENT_ID;
+    const clientSecret = process.env.GMAIL_CLIENT_SECRET;
+    const refreshToken = process.env.GMAIL_REFRESH_TOKEN_kentaroh7;
+
+    const oauth2Client = new google.auth.OAuth2(clientId, clientSecret, "urn:ietf:wg:oauth:2.0:oob");
+    oauth2Client.setCredentials({ refresh_token: refreshToken });
+    return google.gmail({ version: "v1", auth: oauth2Client });
   }
 
-  // IMAPアカウント追加メソッド（設定用）
-  addImapAccount(accountName: string, host: string, port: number, secure: boolean, user: string, encryptedPassword: string): void {
-    this.handler.addImapAccount(accountName, host, port, secure, user, encryptedPassword);
+  async handleListEmails(args) {
+    console.error("[MCP] Gmail listEmails開始");
+    
+    const gmail = await this.initializeGmail();
+    const limit = Math.min(args.limit || 20, 5);
+    
+    console.error(`[MCP] Gmail API呼び出し: limit=${limit}`);
+    const response = await gmail.users.messages.list({
+      userId: "me",
+      q: args.unread_only ? "is:unread" : "in:inbox",
+      maxResults: limit
+    });
+
+    console.error(`[MCP] Gmail API成功: ${response.data.messages?.length || 0}件取得`);
+
+    if (!response.data.messages) return { emails: [] };
+
+    const emails = [];
+    for (const message of response.data.messages.slice(0, 2)) {
+      const detail = await gmail.users.messages.get({
+        userId: "me",
+        id: message.id,
+        format: "metadata",
+        metadataHeaders: ["From", "Subject", "Date"]
+      });
+
+      const headers = detail.data.payload?.headers || [];
+      const getHeader = (name) => headers.find(h => h.name === name)?.value || "";
+
+      emails.push({
+        id: message.id,
+        subject: getHeader("Subject") || "(件名なし)",
+        from: getHeader("From") || "(送信者不明)",
+        date: getHeader("Date") || "",
+        snippet: detail.data.snippet || ""
+      });
+    }
+
+    console.error(`[MCP] listEmails完了: ${emails.length}件`);
+    return { emails };
   }
 
-  addXServerAccount(accountName: string, server: string, domain: string, username: string, encryptedPassword: string): void {
-    this.handler.addXServerAccount(accountName, server, domain, username, encryptedPassword);
+  createResponse(id, result) {
+    return {
+      jsonrpc: "2.0",
+      id,
+      result: { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] }
+    };
+  }
+
+  async handleRequest(request) {
+    console.error(`[MCP] リクエスト処理: ${request.method}`);
+
+    if (request.method === "tools/call" && request.params.name === "list_emails") {
+      const result = await this.handleListEmails(request.params.arguments);
+      return this.createResponse(request.id, result);
+    }
+    
+    return { jsonrpc: "2.0", id: request.id, error: { code: -32601, message: "Unknown method" } };
   }
 }
 
-// メイン実行部分
-async function main() {
-  const server = new MCPEmailServer();
-  
-  // 環境変数からIMAPアカウントを設定
-  const imapAccounts = [
-    {
-      name: 'info_h_fpo_com',
-      host: process.env.IMAP_HOST_info_h_fpo_com || '',
-      port: parseInt(process.env.IMAP_PORT_info_h_fpo_com || '993'),
-      secure: process.env.IMAP_SECURE_info_h_fpo_com === 'true',
-      user: process.env.IMAP_USER_info_h_fpo_com || '',
-      encryptedPassword: process.env.IMAP_PASSWORD_info_h_fpo_com || ''
-    },
-    {
-      name: 'hello_foobar_taroken',
-      host: process.env.IMAP_HOST_hello_foobar_taroken || '',
-      port: parseInt(process.env.IMAP_PORT_hello_foobar_taroken || '993'),
-      secure: process.env.IMAP_SECURE_hello_foobar_taroken === 'true',
-      user: process.env.IMAP_USER_hello_foobar_taroken || '',
-      encryptedPassword: process.env.IMAP_PASSWORD_hello_foobar_taroken || ''
-    }
-  ];
+const server = new WorkingMCPServer();
+const rl = readline.createInterface({ input: process.stdin });
 
-  // XServerアカウントを設定
-  if (process.env.XSERVER_DOMAIN_xserver && process.env.XSERVER_USERNAME_xserver && process.env.XSERVER_PASSWORD_xserver) {
-    server.addXServerAccount(
-      'xserver',
-      'sv14333.xserver.jp',
-      process.env.XSERVER_DOMAIN_xserver,
-      process.env.XSERVER_USERNAME_xserver,
-      process.env.XSERVER_PASSWORD_xserver
-    );
-  }
-
-  // IMAPアカウントを追加
-  for (const account of imapAccounts) {
-    if (account.host && account.user && account.encryptedPassword) {
-      server.addImapAccount(
-        account.name,
-        account.host,
-        account.port,
-        account.secure,
-        account.user,
-        account.encryptedPassword
-      );
-    }
-  }
-
-  // 標準入力からJSONRPCリクエストを読み取り
-const rl = readline.createInterface({
-  input: process.stdin,
-    output: process.stdout
-});
-
-  rl.on('line', async (line) => {
+rl.on("line", async (line) => {
   try {
-      const request = JSON.parse(line) as MCPRequest;
-          const response = await server.handleRequest(request);
-      console.log(JSON.stringify(response));
+    const request = JSON.parse(line);
+    const response = await server.handleRequest(request);
+    console.log(JSON.stringify(response));
+    process.exit(0);
   } catch (error) {
-      console.error(JSON.stringify({
-        jsonrpc: '2.0',
-      id: null,
-      error: {
-        code: -32700,
-        message: 'Parse error'
-      }
-      }));
+    console.error("[ERROR]", error);
   }
 });
-
-  rl.on('close', () => {
-  process.exit(0);
-});
-}
-
-if (import.meta.url === `file://${process.argv[1]}`) {
-  main().catch(console.error);
-}
