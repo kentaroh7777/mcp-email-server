@@ -1,5 +1,5 @@
 import { google, gmail_v1 } from 'googleapis';
-import { GmailConfig, EmailMessage, EmailDetail, ListEmailsParams, Tool, SendEmailParams, SendEmailResult } from './types.js';
+import { EmailMessage, EmailDetail, ListEmailsParams, SendEmailParams, SendEmailResult } from './types.js';
 import * as dotenv from 'dotenv';
 
 export class GmailHandler {
@@ -80,7 +80,7 @@ export class GmailHandler {
   async testConnection(accountName: string): Promise<boolean> {
     try {
       const gmail = await this.authenticate(accountName);
-      const result = await gmail.users.getProfile({ userId: 'me' });
+      await gmail.users.getProfile({ userId: 'me' });
       return true;
     } catch (error) {
       return false;
@@ -138,10 +138,51 @@ export class GmailHandler {
 
       return emails;
       
-    } catch (error) {
+    } catch (error: any) {
+      // OAuth2 invalid_grant エラーを詳細に処理
+      if (error?.message?.includes("invalid_grant") || error?.code === "invalid_grant") {
+        const detailedMessage = `Gmail認証エラー: リフレッシュトークンが無効または期限切れです。
+
+❌ アカウント: ${accountName}
+🔧 解決方法: 以下のコマンドでトークンを再生成してください:
+   node scripts/gmail-desktop-auth.mjs ${accountName.toLowerCase()}
+
+📝 詳細: OAuth 2.0 リフレッシュトークンが無効、期限切れ、または取り消されています。
+新しいリフレッシュトークンを取得するには上記のコマンドを実行し、
+表示されるOAuth URLにアクセスして再認証を行ってください。`;
+        
+        throw new Error(detailedMessage);
+      }
+      
+      // その他のOAuth2エラー
+      if (error?.message?.includes("insufficient authentication") || error?.code === 401) {
+        const detailedMessage = `Gmail権限エラー: APIアクセス権限が不足しています。
+
+❌ アカウント: ${accountName}
+🔧 解決方法:
+   1. Google Cloud ConsoleでGmail APIが有効化されているか確認
+   2. OAuth同意画面でスコープが正しく設定されているか確認
+   3. 以下のコマンドで認証をやり直してください:
+      node scripts/gmail-desktop-auth.mjs ${accountName.toLowerCase()}`;
+      
+        throw new Error(detailedMessage);
+      }
+      
+      // APIクォータ制限エラー
+      if (error?.message?.includes("quotaExceeded") || error?.code === 429) {
+        const detailedMessage = `Gmail API制限エラー: APIクォータ制限に達しました。
+
+❌ アカウント: ${accountName}
+🔧 解決方法:
+   1. しばらく時間をおいて再試行してください
+   2. 複数のリクエストを短時間で送信しないでください
+   3. Google Cloud Consoleでクォータ制限を確認してください`;
+   
+        throw new Error(detailedMessage);
+      }
+      
       throw error;
-    }
-  }
+    }  }
 
   async searchEmails(accountName: string, query: string, limit: number = 20): Promise<EmailMessage[]> {
     try {
