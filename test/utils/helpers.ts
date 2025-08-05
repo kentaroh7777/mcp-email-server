@@ -1,7 +1,6 @@
-import { MCPEmailServer } from '../../src/index.js';
+import McpEmailServer from '../../src/index.js';
 import { MCPRequest, MCPResponse } from '../../src/types.js';
-import { GmailHandler } from '../../src/gmail.js';
-import { IMAPHandler } from '../../src/imap.js';
+import { loadAccounts } from '../../src/config/account-loader.js';
 
 export interface TestEnvironment {
   hasGmail: boolean;
@@ -16,12 +15,16 @@ export interface TestEnvironment {
  * テスト環境の設定状況を確認
  */
 export function getTestEnvironment(): TestEnvironment {
-  const gmailHandler = new GmailHandler();
-  const imapHandler = new IMAPHandler();
+  console.log('getTestEnvironment: Loading accounts...');
+  const allAccounts = loadAccounts();
+  console.log(`getTestEnvironment: Total accounts loaded by account-loader: ${allAccounts.length}`);
   
-  const allGmailAccounts = gmailHandler.getAvailableAccounts();
-  const allImapAccounts = imapHandler.getAvailableAccounts();
+  const allGmailAccounts = allAccounts.filter(acc => acc.type === 'gmail').map(acc => acc.name);
+  const allImapAccounts = allAccounts.filter(acc => acc.type === 'imap').map(acc => acc.name);
   
+  console.log(`getTestEnvironment: Gmail accounts found: ${allGmailAccounts.join(', ') || 'None'}`);
+  console.log(`getTestEnvironment: IMAP accounts found: ${allImapAccounts.join(', ') || 'None'}`);
+
   return {
     hasGmail: allGmailAccounts.length > 0,
     hasImap: allImapAccounts.length > 0,
@@ -229,11 +232,11 @@ export class LogMonitor {
 }
 
 export class TestHelper {
-  private server: MCPEmailServer;
+  private server: McpEmailServer;
   private logMonitor: LogMonitor;
 
   constructor() {
-    this.server = new MCPEmailServer();
+    this.server = new McpEmailServer();
     this.logMonitor = new LogMonitor();
   }
 
@@ -392,9 +395,9 @@ export class TestHelper {
     const fs = await import('fs');
     const requiredFiles = [
       'src/index.ts',
-      'src/gmail.ts',
-      'src/imap.ts',
-      'src/crypto.ts',
+      'src/services/gmail.ts',
+      'src/services/imap.ts',
+      'src/utils/crypto.ts',
       'src/types.ts',
       'package.json',
       'tsconfig.json',

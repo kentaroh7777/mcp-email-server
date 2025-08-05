@@ -1,4 +1,4 @@
-# Dependencies
+Gatsby# Dependencies
 node_modules/
 npm-debug.log*
 yarn-debug.log*
@@ -170,3 +170,5 @@ mcp-debug.log
 mcp-error.log
 
 logs/
+
+temp_vitest_crypto_test/

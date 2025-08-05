@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeAll } from 'vitest';
 import { TestHelper } from '../utils/helpers.js';
+import { decrypt } from '../../src/utils/crypto';
 
 describe('Email Detail Tests', () => {
   let helper: TestHelper;
@@ -35,16 +36,16 @@ describe('Email Detail Tests', () => {
 
       expect(listResponse.error).toBeUndefined();
       const listData = JSON.parse(listResponse.result.content[0].text);
-      expect(listData.emails).toBeDefined();
-      expect(Array.isArray(listData.emails)).toBe(true);
+      expect(listData).toBeDefined();
+      expect(Array.isArray(listData)).toBe(true);
 
-      if (listData.emails.length === 0) {
+      if (listData.length === 0) {
         console.log('No emails found in Gmail account, skipping detail test');
         return;
       }
 
       // 最初のメールの詳細を取得
-      const emailId = listData.emails[0].id;
+      const emailId = listData[0].id;
       console.log(`Getting detail for email ID: ${emailId}`);
 
       const detailResponse = await helper.callTool('get_email_detail', {
@@ -56,27 +57,27 @@ describe('Email Detail Tests', () => {
       const detailData = JSON.parse(detailResponse.result.content[0].text);
       
       // 詳細データの検証
-      expect(detailData.email).toBeDefined();
-      expect(detailData.email.id).toBe(emailId);
-      expect(detailData.email.subject).toBeDefined();
-      expect(detailData.email.from).toBeDefined();
-      expect(detailData.email.body).toBeDefined();
-      expect(typeof detailData.email.body).toBe('string');
-      expect(detailData.email.body.length).toBeGreaterThan(0);
+      expect(detailData).toBeDefined();
+      expect(detailData.id).toBe(emailId);
+      expect(detailData.subject).toBeDefined();
+      expect(detailData.from).toBeDefined();
+      expect(detailData.body).toBeDefined();
+      expect(typeof detailData.body).toBe('string');
+      expect(detailData.body.length).toBeGreaterThan(0);
       
       console.log(`Successfully retrieved email detail:`);
-      console.log(`  Subject: ${detailData.email.subject}`);
-      console.log(`  From: ${detailData.email.from}`);
-      console.log(`  Body length: ${detailData.email.body.length} characters`);
-      console.log(`  Body preview: ${detailData.email.body.substring(0, 100)}...`);
+      console.log(`  Subject: ${detailData.subject}`);
+      console.log(`  From: ${detailData.from}`);
+      console.log(`  Body length: ${detailData.body.length} characters`);
+      console.log(`  Body preview: ${detailData.body.substring(0, 100)}...`);
       
       // 添付ファイル情報の検証
-      expect(detailData.email.attachments).toBeDefined();
-      expect(Array.isArray(detailData.email.attachments)).toBe(true);
+      expect(detailData.attachments).toBeDefined();
+      expect(Array.isArray(detailData.attachments)).toBe(true);
       
-      if (detailData.email.attachments.length > 0) {
-        console.log(`  Attachments: ${detailData.email.attachments.length} files`);
-        detailData.email.attachments.forEach((attachment: any, index: number) => {
+      if (detailData.attachments.length > 0) {
+        console.log(`  Attachments: ${detailData.attachments.length} files`);
+        detailData.attachments.forEach((attachment: any, index: number) => {
           console.log(`    ${index + 1}. ${attachment.filename} (${attachment.contentType}, ${attachment.size} bytes)`);
         });
       }
@@ -103,16 +104,16 @@ describe('Email Detail Tests', () => {
 
       expect(listResponse.error).toBeUndefined();
       const listData = JSON.parse(listResponse.result.content[0].text);
-      expect(listData.emails).toBeDefined();
-      expect(Array.isArray(listData.emails)).toBe(true);
+      expect(listData).toBeDefined();
+      expect(Array.isArray(listData)).toBe(true);
 
-      if (listData.emails.length === 0) {
+      if (listData.length === 0) {
         console.log('No emails found in IMAP account, skipping detail test');
         return;
       }
 
       // 最初のメールの詳細を取得
-      const emailId = listData.emails[0].id;
+      const emailId = listData[0].id;
       console.log(`Getting detail for email ID: ${emailId}`);
 
       const detailResponse = await helper.callTool('get_email_detail', {
@@ -124,27 +125,27 @@ describe('Email Detail Tests', () => {
       const detailData = JSON.parse(detailResponse.result.content[0].text);
       
       // 詳細データの検証
-      expect(detailData.email).toBeDefined();
-      expect(detailData.email.id).toBe(emailId);
-      expect(detailData.email.subject).toBeDefined();
-      expect(detailData.email.from).toBeDefined();
-      expect(detailData.email.body).toBeDefined();
-      expect(typeof detailData.email.body).toBe('string');
-      expect(detailData.email.body.length).toBeGreaterThan(0);
+      expect(detailData).toBeDefined();
+      expect(detailData.id).toBe(emailId);
+      expect(detailData.subject).toBeDefined();
+      expect(detailData.from).toBeDefined();
+      expect(detailData.body).toBeDefined();
+      expect(typeof detailData.body).toBe('string');
+      expect(detailData.body.length).toBeGreaterThan(0);
       
       console.log(`Successfully retrieved IMAP email detail:`);
-      console.log(`  Subject: ${detailData.email.subject}`);
-      console.log(`  From: ${detailData.email.from}`);
-      console.log(`  Body length: ${detailData.email.body.length} characters`);
-      console.log(`  Body preview: ${detailData.email.body.substring(0, 100)}...`);
+      console.log(`  Subject: ${detailData.subject}`);
+      console.log(`  From: ${detailData.from}`);
+      console.log(`  Body length: ${detailData.body.length} characters`);
+      console.log(`  Body preview: ${detailData.body.substring(0, 100)}...`);
       
       // 添付ファイル情報の検証
-      expect(detailData.email.attachments).toBeDefined();
-      expect(Array.isArray(detailData.email.attachments)).toBe(true);
+      expect(detailData.attachments).toBeDefined();
+      expect(Array.isArray(detailData.attachments)).toBe(true);
       
-      if (detailData.email.attachments.length > 0) {
-        console.log(`  Attachments: ${detailData.email.attachments.length} files`);
-        detailData.email.attachments.forEach((attachment: any, index: number) => {
+      if (detailData.attachments.length > 0) {
+        console.log(`  Attachments: ${detailData.attachments.length} files`);
+        detailData.attachments.forEach((attachment: any, index: number) => {
           console.log(`    ${index + 1}. ${attachment.filename} (${attachment.contentType}, ${attachment.size} bytes)`);
         });
       }
@@ -181,12 +182,12 @@ describe('Email Detail Tests', () => {
 
           const listData = JSON.parse(listResponse.result.content[0].text);
           
-          if (!listData.emails || listData.emails.length === 0) {
+          if (!listData || listData.length === 0) {
             console.log(`  No emails found in account`);
             continue;
           }
 
-          const emailId = listData.emails[0].id;
+          const emailId = listData[0].id;
           
           // メール詳細を取得
           const detailResponse = await helper.callTool('get_email_detail', {
@@ -202,13 +203,13 @@ describe('Email Detail Tests', () => {
           const detailData = JSON.parse(detailResponse.result.content[0].text);
           
           // 基本的な検証
-          expect(detailData.email).toBeDefined();
-          expect(detailData.email.id).toBe(emailId);
-          expect(detailData.email.body).toBeDefined();
-          expect(typeof detailData.email.body).toBe('string');
+          expect(detailData).toBeDefined();
+          expect(detailData.id).toBe(emailId);
+          expect(detailData.body).toBeDefined();
+          expect(typeof detailData.body).toBe('string');
           
-          console.log(`  ✅ Success - Subject: ${detailData.email.subject}`);
-          console.log(`  ✅ Body length: ${detailData.email.body.length} characters`);
+          console.log(`  ✅ Success - Subject: ${detailData.subject}`);
+          console.log(`  ✅ Body length: ${detailData.body.length} characters`);
           
           successfulTests++;
           
@@ -226,6 +227,17 @@ describe('Email Detail Tests', () => {
   });
 
   describe('Email Detail Error Handling', () => {
+    test('復号化が正しく動作する', () => {
+      const encryptionKey = process.env.EMAIL_ENCRYPTION_KEY;
+      const encryptedPassword = process.env.XSERVER_PASSWORD_info_h_fpo_com;
+      console.log(`Test Decryption: Key=${encryptionKey}, Encrypted=${encryptedPassword}`);
+      
+      expect(encryptionKey).toBeDefined();
+      expect(encryptedPassword).toBeDefined();
+
+      const decrypted = decrypt(encryptedPassword, encryptionKey);
+      expect(decrypted).toBe('ste8vie23'); // 復号化されたパスワードの期待値
+    });
     test('存在しないメールIDで適切なエラーを返す', async () => {
       if (configuredAccounts.gmail.length === 0) {
         return;

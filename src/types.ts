@@ -7,9 +7,33 @@ export interface MCPRequest {
 
 export interface MCPResponse {
   jsonrpc: '2.0';
-  id: string | number;
+  id: string | number | null;
   result?: any;
   error?: MCPError;
+}
+
+export interface MCPErrorData {
+  [key: string]: any;
+}
+
+export class McpError extends Error {
+  public code: number;
+  public data?: MCPErrorData;
+
+  constructor(code: number, message: string, data?: MCPErrorData) {
+    super(message);
+    this.name = 'McpError';
+    this.code = code;
+    this.data = data;
+  }
+
+  toObject() {
+    return {
+      code: this.code,
+      message: this.message,
+      data: this.data,
+    };
+  }
 }
 
 export interface MCPError {
@@ -33,11 +57,24 @@ export interface IMAPConfig {
   password: string;
 }
 
-export interface EmailAccount {
-  id: string;
+export type Account = GmailAccount | ImapAccount;
+
+export interface GmailAccount {
   name: string;
-  type: 'gmail' | 'imap';
-  config: GmailConfig | IMAPConfig;
+  type: 'gmail';
+  clientId: string;
+  clientSecret: string;
+  refreshToken: string;
+}
+
+export interface ImapAccount {
+  name: string;
+  type: 'imap';
+  host: string;
+  port: number;
+  tls: boolean;
+  user: string;
+  password: string;
 }
 
 export interface InitializeResult {
@@ -59,6 +96,7 @@ export interface Tool {
     type: string;
     properties: Record<string, any>;
     required?: string[];
+    oneOf?: any[]; // Add oneOf for top-level schema
   };
 }
 

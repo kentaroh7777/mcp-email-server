@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { IMAPHandler } from '../../src/imap.js';
+import { AccountManager } from '../../src/services/account-manager.js';
+import { IMAPHandler } from '../../src/services/imap';
 import { checkTestPrerequisites, getTestAccountName } from '../utils/helpers.js';
 
 describe('Simple IMAP Handler Test', () => {
@@ -13,7 +14,8 @@ describe('Simple IMAP Handler Test', () => {
   });
 
   it('should list available IMAP accounts', async () => {
-    const imapHandler = new IMAPHandler();
+    const accountManager = new AccountManager();
+    const imapHandler = new IMAPHandler(accountManager.getImapAccounts());
     const accounts = imapHandler.getAvailableAccounts();
     
     console.log('Available IMAP accounts:', accounts.length > 0 ? `${accounts.length} accounts configured` : 'No IMAP accounts');
@@ -25,7 +27,8 @@ describe('Simple IMAP Handler Test', () => {
 
   it.skipIf(!getTestAccountName('imap'))('should get unread count for IMAP account', async () => {
     const accountName = getTestAccountName('imap')!;
-    const imapHandler = new IMAPHandler();
+    const accountManager = new AccountManager();
+    const imapHandler = new IMAPHandler(accountManager.getImapAccounts());
     
     console.log(`Testing unread count for account: ${accountName}`);
     
@@ -44,7 +47,8 @@ describe('Simple IMAP Handler Test', () => {
 
   it.skipIf(!getTestAccountName('imap'))('should list emails from IMAP account', async () => {
     const accountName = getTestAccountName('imap')!;
-    const imapHandler = new IMAPHandler();
+    const accountManager = new AccountManager();
+    const imapHandler = new IMAPHandler(accountManager.getImapAccounts());
     
     console.log(`Testing email list for account: ${accountName}`);
     

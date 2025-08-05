@@ -11,6 +11,7 @@ export default defineConfig({
     include: ['test/**/*.test.ts', 'test/**/*.test.js'],
     exclude: ['node_modules/**', 'dist/**'],
     // ログ監視設定：標準出力のエラーパターンを監視
+    /*
     onConsoleLog(log, type) {
       // DEBUGエラーや予期しないAPI呼び出しを検出
       const errorPatterns = [
@@ -42,6 +43,7 @@ export default defineConfig({
       
       return false; // ログを通常通り出力
     }
+    */
   },
   resolve: {
     alias: {

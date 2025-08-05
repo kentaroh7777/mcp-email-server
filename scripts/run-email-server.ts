@@ -12,7 +12,7 @@ const envPath = join(dirname(__dirname), '.env');
 
 dotenv.config({ path: envPath });
 
-import { MCPEmailProtocolHandler } from '../src/mcp-handler.js';
+import McpEmailServer from '../src/index.js';
 import { setupProductionLogging, logToFile, outputMCPResponse } from '../src/file-logger.js';
 import * as readline from 'readline';
 
@@ -20,18 +20,13 @@ import * as readline from 'readline';
 setupProductionLogging();
 
 // サーバー起動ログ（テスト環境では抑制）
-if (process.env.NODE_ENV !== 'test') {
-  logToFile('info', 'MCP Email Server starting...', { 
-    nodeEnv: process.env.NODE_ENV,
-    pid: process.pid 
-  });
-}
+
 
 // 暗号化キーを環境変数から取得
 const encryptionKey = process.env.EMAIL_ENCRYPTION_KEY || 'default-key';
 
 // MCPハンドラーを初期化
-const handler = new MCPEmailProtocolHandler(encryptionKey);
+const handler = new McpEmailServer();
 
 // アカウント設定を環境変数から自動設定
 
