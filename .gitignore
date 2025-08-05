@@ -172,3 +172,5 @@ mcp-error.log
 logs/
 
 temp_vitest_crypto_test/
+
+.claude/

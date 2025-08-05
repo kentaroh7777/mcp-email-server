@@ -1,6 +1,9 @@
 import { describe, test, expect, beforeAll } from 'vitest';
 import { TestHelper } from '../utils/helpers.js';
-import { decrypt } from '../../src/utils/crypto';
+import { encrypt, decrypt } from '../../src/utils/crypto';
+import { IMAPHandler } from '../../src/services/imap';
+import { ImapAccount } from '../../src/types';
+import { AccountManager } from '../../src/services/account-manager';
 
 describe('Email Detail Tests', () => {
   let helper: TestHelper;
@@ -86,68 +89,88 @@ describe('Email Detail Tests', () => {
 
   describe('IMAP Email Detail Retrieval', () => {
     test('IMAPアカウントから実際のメール詳細を取得できる', async () => {
-      const imapAccounts = [...configuredAccounts.imap, ...configuredAccounts.xserver];
-      
-      if (imapAccounts.length === 0) {
-        console.log('IMAP accounts not configured, skipping test');
+      const encryptionKey = process.env.EMAIL_ENCRYPTION_KEY;
+      if (!encryptionKey) {
+        console.log('テストスキップ: EMAIL_ENCRYPTION_KEY が .env に設定されていません。');
         return;
       }
 
-      const accountName = imapAccounts[0];
+      const imapAccounts = [...configuredAccounts.imap, ...configuredAccounts.xserver];
+      if (imapAccounts.length === 0) {
+        console.log(`テストスキップ: IMAP Email Detail Retrieval テストには、.env ファイルにIMAPアカウントの設定が必要です。
+          例:
+          IMAP_HOST_your_account=your_imap_host
+          IMAP_USER_your_account=your_imap_username
+          IMAP_PASSWORD_your_account=your_encrypted_imap_password
+          または
+          XSERVER_DOMAIN_your_account=your_domain
+          XSERVER_USERNAME_your_account=your_username
+          XSERVER_PASSWORD_your_account=your_encrypted_xserver_password
+        `);
+        return;
+      }
+
+      const accountManager = new AccountManager();
+      const targetAccountName = imapAccounts[0]; // 最初のIMAPアカウントを使用
+      const originalImapAccount = accountManager.getAccount(targetAccountName) as ImapAccount;
+
+      if (!originalImapAccount) {
+        console.log(`テストスキップ: IMAPアカウント ${targetAccountName} の詳細が AccountManager から取得できませんでした。`);
+        return;
+      }
+
+      // IMAPHandlerを直接インスタンス化（内部で復号化される）
+      const imapHandler = new IMAPHandler([originalImapAccount], encryptionKey);
+      const accountName = originalImapAccount.name;
+
       console.log(`Testing IMAP email detail for account: ${accountName}`);
 
-      // まず最新のメール一覧を取得
-      const listResponse = await helper.callTool('list_emails', {
-        account_name: accountName,
-        limit: 3
-      });
+      try {
+        // まず最新のメール一覧を取得
+        const listData = await imapHandler.listEmails(accountName, { limit: 3 });
 
-      expect(listResponse.error).toBeUndefined();
-      const listData = JSON.parse(listResponse.result.content[0].text);
-      expect(listData).toBeDefined();
-      expect(Array.isArray(listData)).toBe(true);
+        expect(listData).toBeDefined();
+        expect(Array.isArray(listData)).toBe(true);
 
-      if (listData.length === 0) {
-        console.log('No emails found in IMAP account, skipping detail test');
-        return;
-      }
+        if (listData.length === 0) {
+          console.log('No emails found in IMAP account, skipping detail test');
+          return;
+        }
 
-      // 最初のメールの詳細を取得
-      const emailId = listData[0].id;
-      console.log(`Getting detail for email ID: ${emailId}`);
+        // 最初のメールの詳細を取得
+        const emailId = listData[0].id;
+        console.log(`Getting detail for email ID: ${emailId}`);
 
-      const detailResponse = await helper.callTool('get_email_detail', {
-        account_name: accountName,
-        email_id: emailId
-      });
-
-      expect(detailResponse.error).toBeUndefined();
-      const detailData = JSON.parse(detailResponse.result.content[0].text);
-      
-      // 詳細データの検証
-      expect(detailData).toBeDefined();
-      expect(detailData.id).toBe(emailId);
-      expect(detailData.subject).toBeDefined();
-      expect(detailData.from).toBeDefined();
-      expect(detailData.body).toBeDefined();
-      expect(typeof detailData.body).toBe('string');
-      expect(detailData.body.length).toBeGreaterThan(0);
-      
-      console.log(`Successfully retrieved IMAP email detail:`);
-      console.log(`  Subject: ${detailData.subject}`);
-      console.log(`  From: ${detailData.from}`);
-      console.log(`  Body length: ${detailData.body.length} characters`);
-      console.log(`  Body preview: ${detailData.body.substring(0, 100)}...`);
-      
-      // 添付ファイル情報の検証
-      expect(detailData.attachments).toBeDefined();
-      expect(Array.isArray(detailData.attachments)).toBe(true);
-      
-      if (detailData.attachments.length > 0) {
-        console.log(`  Attachments: ${detailData.attachments.length} files`);
-        detailData.attachments.forEach((attachment: any, index: number) => {
-          console.log(`    ${index + 1}. ${attachment.filename} (${attachment.contentType}, ${attachment.size} bytes)`);
-        });
+        const detailData = await imapHandler.getEmailDetail(accountName, emailId);
+        
+        // 詳細データの検証
+        expect(detailData).toBeDefined();
+        expect(detailData.id).toBe(emailId);
+        expect(detailData.subject).toBeDefined();
+        expect(detailData.from).toBeDefined();
+        expect(detailData.body).toBeDefined();
+        expect(typeof detailData.body).toBe('string');
+        expect(detailData.body.length).toBeGreaterThan(0);
+        
+        console.log(`Successfully retrieved IMAP email detail:`);
+        console.log(`  Subject: ${detailData.subject}`);
+        console.log(`  From: ${detailData.from}`);
+        console.log(`  Body length: ${detailData.body.length} characters`);
+        console.log(`  Body preview: ${detailData.body.substring(0, 100)}...`);
+        
+        // 添付ファイル情報の検証
+        expect(detailData.attachments).toBeDefined();
+        expect(Array.isArray(detailData.attachments)).toBe(true);
+        
+        if (detailData.attachments.length > 0) {
+          console.log(`  Attachments: ${detailData.attachments.length} files`);
+          detailData.attachments.forEach((attachment: any, index: number) => {
+            console.log(`    ${index + 1}. ${attachment.filename} (${attachment.contentType}, ${attachment.size} bytes)`);
+          });
+        }
+      } catch (error: any) {
+        console.error(`IMAP Email Detail Retrieval failed for ${accountName}: ${error.message}`);
+        throw error; // テストを失敗させる
       }
     }, 30000);
   });
@@ -227,16 +250,21 @@ describe('Email Detail Tests', () => {
   });
 
   describe('Email Detail Error Handling', () => {
-    test('復号化が正しく動作する', () => {
+    test('暗号化・復号のサイクルが正しく動作する', () => {
       const encryptionKey = process.env.EMAIL_ENCRYPTION_KEY;
-      const encryptedPassword = process.env.XSERVER_PASSWORD_info_h_fpo_com;
-      console.log(`Test Decryption: Key=${encryptionKey}, Encrypted=${encryptedPassword}`);
-      
-      expect(encryptionKey).toBeDefined();
-      expect(encryptedPassword).toBeDefined();
+      expect(encryptionKey, 'EMAIL_ENCRYPTION_KEY must be defined in .env').toBeDefined();
 
-      const decrypted = decrypt(encryptedPassword, encryptionKey);
-      expect(decrypted).toBe('ste8vie23'); // 復号化されたパスワードの期待値
+      const originalPassword = 'my-secret-password-for-testing';
+      
+      // 1. Encrypt the password
+      const encryptedPassword = encrypt(originalPassword, encryptionKey!);
+      
+      // 2. Decrypt the password
+      const decryptedPassword = decrypt(encryptedPassword, encryptionKey!);
+      
+      // 3. Verify that the decrypted password matches the original
+      expect(decryptedPassword).toBe(originalPassword);
+      console.log('✅ Encryption/Decryption cycle test passed.');
     });
     test('存在しないメールIDで適切なエラーを返す', async () => {
       if (configuredAccounts.gmail.length === 0) {

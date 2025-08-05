@@ -96,18 +96,21 @@ export class IMAPHandler {
 
   private async createConnection(config: ImapAccount): Promise<any> {
     try {
-      const decryptedPassword = decrypt(config.password, this.encryptionKey);
-      console.log(`Attempting to decrypt password for ${config.name}. Encrypted: ${config.password}, Key: ${this.encryptionKey}`);
-      console.log(`Decrypted password: ${decryptedPassword}`);
       const imapConfig = {
         ...config,
-        password: decryptedPassword,
         authTimeout: this.connectionTimeout,
         connTimeout: this.connectionTimeout,
         tls: config.tls,
         tlsOptions: { rejectUnauthorized: false },
         keepalive: false // Disable keepalive to prevent hanging connections
       };
+
+      try {
+        const decryptedPassword = decrypt(config.password, this.encryptionKey);
+        imapConfig.password = decryptedPassword;
+      } catch (decryptError: any) {
+        throw new Error(`Failed to decrypt password for ${config.name}: ${decryptError.message}. Please ensure the password in your .env file is correctly encrypted and matches the EMAIL_ENCRYPTION_KEY.`);
+      }
 
       const imap = new Imap(imapConfig);
       

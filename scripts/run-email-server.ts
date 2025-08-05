@@ -25,43 +25,8 @@ setupProductionLogging();
 // 暗号化キーを環境変数から取得
 const encryptionKey = process.env.EMAIL_ENCRYPTION_KEY || 'default-key';
 
-// MCPハンドラーを初期化
+// MCPハンドラーを初期化（アカウントは自動読み込み）
 const handler = new McpEmailServer();
-
-// アカウント設定を環境変数から自動設定
-
-// IMAP アカウントの自動設定
-const imapAccounts = Object.keys(process.env)
-  .filter(key => key.startsWith('IMAP_HOST_'))
-  .map(key => key.replace('IMAP_HOST_', ''));
-
-for (const accountName of imapAccounts) {
-  const host = process.env[`IMAP_HOST_${accountName}`];
-  const port = parseInt(process.env[`IMAP_PORT_${accountName}`] || '993');
-  const secure = process.env[`IMAP_SECURE_${accountName}`] !== 'false';
-  const user = process.env[`IMAP_USER_${accountName}`];
-  const password = process.env[`IMAP_PASSWORD_${accountName}`];
-  
-  if (host && user && password) {
-    handler.addImapAccount(accountName, host, port, secure, user, password);
-  }
-}
-
-// XServer アカウントの自動設定
-const xserverAccounts = Object.keys(process.env)
-  .filter(key => key.startsWith('XSERVER_DOMAIN_'))
-  .map(key => key.replace('XSERVER_DOMAIN_', ''));
-
-for (const accountName of xserverAccounts) {
-  const server = process.env[`XSERVER_SERVER_${accountName}`];
-  const domain = process.env[`XSERVER_DOMAIN_${accountName}`];
-  const username = process.env[`XSERVER_USER_${accountName}`];
-  const password = process.env[`XSERVER_PASSWORD_${accountName}`];
-  
-  if (server && domain && username && password) {
-    handler.addXServerAccount(accountName, server, domain, username, password);
-  }
-}
 
 // stdinからのJSONRPCメッセージを処理
 const rl = readline.createInterface({

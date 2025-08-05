@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import dotenv from 'dotenv';
-import { encrypt } from '../dist/crypto.js';
+import { encrypt } from '../src/utils/crypto.js';
 import * as readline from 'readline';
 
 dotenv.config();
@@ -29,7 +29,7 @@ async function getPasswordInput(prompt: string): Promise<string> {
 
   const password = await query(prompt);
   rl.close();
-  return password;
+  return password.trim(); // 改行文字を除去
 }
 
 async function main() {
