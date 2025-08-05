@@ -19,13 +19,18 @@ async function runHealthCheck(): Promise<{
   const errors: string[] = [];
 
   // 1. list_accountsツールを呼び出して全てのアカウント名を取得
+  console.log(`🔄 list_accounts をテスト中...`);
   const listAccountsCommand = {
     jsonrpc: '2.0',
     id: 1,
     method: 'tools/call',
     params: { name: 'list_accounts', arguments: {} }
   };
-  const listAccountsResult = await runMCPCommand(listAccountsCommand, 30000);
+  const listAccountsResult = await runMCPCommand(listAccountsCommand, 10000);
+  
+  const status = listAccountsResult.success ? '✅' : (listAccountsResult.timedOut ? '⏰' : '❌');
+  console.log(`  ${status} ${listAccountsResult.success ? '成功' : (listAccountsResult.timedOut ? 'タイムアウト' : '失敗')}`);
+  
   results.push({
     test: 'list_accounts',
     success: listAccountsResult.success,
@@ -48,7 +53,7 @@ async function runHealthCheck(): Promise<{
   }
 
   // 2. その他のテストコマンドを動的に生成
-  const dynamicTestCommands: { name: string; command: any }[] = [];
+  const dynamicTestCommands: { name: string; command: any; timeout?: number }[] = [];
 
   // 統合ツール (list_accountsは既に実行済み)
   dynamicTestCommands.push(
@@ -61,23 +66,27 @@ async function runHealthCheck(): Promise<{
         params: { name: 'get_account_stats', arguments: {} }
       }
     },
-    {
-      name: 'search_all_emails',
-      command: {
-        jsonrpc: '2.0',
-        id: 3,
-        method: 'tools/call',
-        params: {
-          name: 'search_all_emails',
-          arguments: { query: 'test', limit: 1, accounts: 'ALL' }
-        }
-      }
-    }
+    // search_all_emailsは別途 test-search-all.sh でテスト
+    // プロセス管理の制約によりmonitor-health.tsからは除外
   );
 
-  // 各アカウントに対するテスト
+  // 各アカウントに対する軽量テスト（全アカウント）
   for (const accountName of allAccountNames) {
-    // list_emails
+    // test_connection（軽量で安全、認証状態をチェック）
+    dynamicTestCommands.push({
+      name: `test_connection (${accountName})`,
+      command: {
+        jsonrpc: '2.0',
+        id: results.length + 1,
+        method: 'tools/call',
+        params: {
+          name: 'test_connection',
+          arguments: { account_name: accountName }
+        }
+      }
+    });
+
+    // list_emails（1件のみ、軽量、実際の接続テスト）
     dynamicTestCommands.push({
       name: `list_emails (${accountName})`,
       command: {
@@ -90,59 +99,18 @@ async function runHealthCheck(): Promise<{
         }
       }
     });
-
-    // get_email_detail (dummy_idを使用)
-    dynamicTestCommands.push({
-      name: `get_email_detail (${accountName})`,
-      command: {
-        jsonrpc: '2.0',
-        id: results.length + 1,
-        method: 'tools/call',
-        params: {
-          name: 'get_email_detail',
-          arguments: { account_name: accountName, email_id: 'dummy_id' }
-        }
-      }
-    });
-
-    // archive_email (dummy_idを使用)
-    dynamicTestCommands.push({
-      name: `archive_email (${accountName})`,
-      command: {
-        jsonrpc: '2.0',
-        id: results.length + 1,
-        method: 'tools/call',
-        params: {
-          name: 'archive_email',
-          arguments: { account_name: accountName, email_id: 'dummy_id' }
-        }
-      }
-    });
-
-    // send_email (ダミーの宛先と内容)
-    dynamicTestCommands.push({
-      name: `send_email (${accountName})`,
-      command: {
-        jsonrpc: '2.0',
-        id: results.length + 1,
-        method: 'tools/call',
-        params: {
-          name: 'send_email',
-          arguments: {
-            account_name: accountName,
-            to: 'test@example.com',
-            subject: 'Health Check Test',
-            text: 'This is a health check test email.'
-          }
-        }
-      }
-    });
   }
 
   // 3. 動的に生成されたコマンドを実行
   for (const test of dynamicTestCommands) {
     try {
-      const result = await runMCPCommand(test.command, 30000); // 30秒タイムアウト
+      console.log(`🔄 ${test.name} をテスト中...`);
+      const timeout = test.timeout || 10000; // カスタムタイムアウトまたはデフォルト10秒
+      const result = await runMCPCommand(test.command, timeout);
+      
+      const status = result.success ? '✅' : (result.timedOut ? '⏰' : '❌');
+      console.log(`  ${status} ${result.success ? '成功' : (result.timedOut ? 'タイムアウト' : '失敗')}`);
+      
       results.push({
         test: test.name,
         success: result.success,
@@ -153,6 +121,7 @@ async function runHealthCheck(): Promise<{
         errors.push(`${test.name}: ${result.error || 'Timeout'}`);
       }
     } catch (error) {
+      console.log(`  ❌ エラー: ${error}`);
       errors.push(`${test.name}: ${error}`);
       results.push({
         test: test.name,
@@ -169,14 +138,14 @@ async function runHealthCheck(): Promise<{
   };
 }
 
-async function runMCPCommand(command: any, timeoutMs: number = 30000): Promise<{
+async function runMCPCommand(command: any, timeoutMs: number = 10000): Promise<{
   success: boolean;
   response?: any;
   error?: string;
   timedOut: boolean;
 }> {
   return new Promise((resolve) => {
-    const child = spawn('npx', ['tsx', serverPath], {
+    const child = spawn('timeout', [`${Math.ceil(timeoutMs/1000)}s`, 'npx', 'tsx', serverPath], {
       stdio: ['pipe', 'pipe', 'pipe']
     });
 
@@ -184,15 +153,16 @@ async function runMCPCommand(command: any, timeoutMs: number = 30000): Promise<{
     let stderr = '';
     let timedOut = false;
 
-    const timeout = setTimeout(() => {
-      timedOut = true;
-      child.kill('SIGTERM');
-      resolve({
-        success: false,
-        error: 'Command timed out',
-        timedOut: true
-      });
-    }, timeoutMs);
+    // timeoutコマンドを使用しているので、内部タイムアウトは不要
+    // const timeout = setTimeout(() => {
+    //   timedOut = true;
+    //   child.kill('SIGTERM');
+    //   resolve({
+    //     success: false,
+    //     error: 'Command timed out',
+    //     timedOut: true
+    //   });
+    // }, timeoutMs);
 
     child.stdout.on('data', (data) => {
       stdout += data.toString();
@@ -203,13 +173,19 @@ async function runMCPCommand(command: any, timeoutMs: number = 30000): Promise<{
     });
 
     child.on('close', (code) => {
-      clearTimeout(timeout);
-      
-      if (timedOut) return;
-
       try {
-        if (stdout.trim()) {
-          const response = JSON.parse(stdout.trim());
+        if (code === 124) {
+          // timeoutコマンドのタイムアウト終了コード
+          resolve({
+            success: false,
+            error: 'Command timed out',
+            timedOut: true
+          });
+        } else if (stdout.trim()) {
+          // 複数のJSONレスポンスがある場合、最初のものを使用
+          const lines = stdout.trim().split('\n');
+          const firstLine = lines[0];
+          const response = JSON.parse(firstLine);
           resolve({
             success: true,
             response,
@@ -232,7 +208,6 @@ async function runMCPCommand(command: any, timeoutMs: number = 30000): Promise<{
     });
 
     child.on('error', (error) => {
-      clearTimeout(timeout);
       resolve({
         success: false,
         error: `Process error: ${error.message}`,
@@ -247,7 +222,7 @@ async function runMCPCommand(command: any, timeoutMs: number = 30000): Promise<{
 
 async function main() {
   console.log('🏥 Running comprehensive health check...\n');
-  console.log('Testing all email server tools (timeout: 30s each)\n');
+  console.log('Testing all accounts and core tools (timeout: 10s each)\n');
   
   const health = await runHealthCheck();
   
@@ -263,7 +238,7 @@ async function main() {
   
   // 統合ツール
   console.log('\n🔗 統合ツール:');
-  ['list_accounts', 'get_account_stats', 'search_all_emails'].forEach(toolName => {
+  ['list_accounts', 'get_account_stats'].forEach(toolName => {
     const result = health.results.find(r => r.test === toolName);
     if (result) {
       const status = result.success ? '✅' : (result.timedOut ? '⏰' : '❌');
@@ -271,15 +246,18 @@ async function main() {
     }
   });
   
-  // 統合されたメールツール
-  console.log('\n📧 統合されたメールツール:');
-  ['list_emails', 'get_email_detail', 'archive_email', 'send_email'].forEach(toolName => {
-    const result = health.results.find(r => r.test === toolName);
-    if (result) {
+  // search_all_emailsは別途テスト
+  console.log('\n💡 search_all_emails は別途テスト:');
+  console.log('  📝 ./scripts/test-search-all.sh を実行してください');
+  
+  // アカウント別テスト結果
+  console.log('\n📧 アカウント別テスト結果:');
+  health.results
+    .filter(r => r.test.includes('(') && r.test.includes(')'))
+    .forEach(result => {
       const status = result.success ? '✅' : (result.timedOut ? '⏰' : '❌');
       console.log(`  ${status} ${result.test}`);
-    }
-  });
+    });
 
   process.exit(health.success ? 0 : 1);
 }

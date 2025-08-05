@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { AccountManager } from '../../src/services/account-manager.js';
-import { IMAPHandler } from '../../src/services/imap';
+import { ImapFlowHandler } from '../../src/services/imapflow-handler.js';
 import { checkTestPrerequisites, getTestAccountName } from '../utils/helpers.js';
-import { encrypt, decrypt } from '../../src/utils/crypto';
+import { encrypt, decrypt } from '../../src/crypto.js';
 import { ImapAccount } from '../../src/types';
 
 describe('Simple IMAP Handler Test', () => {
@@ -22,7 +22,7 @@ describe('Simple IMAP Handler Test', () => {
     }
   });
 
-  // IMAPHandlerのインスタンスを生成するヘルパー関数
+  // ImapFlowHandlerのインスタンスを生成するヘルパー関数
   const createImapHandlerWithEncryptedPassword = (accountName: string) => {
     const accountManager = new AccountManager();
     const originalImapAccounts = accountManager.getImapAccounts();
@@ -37,13 +37,13 @@ describe('Simple IMAP Handler Test', () => {
     const dummyPassword = 'test-imap-password-for-simple-test';
     const encryptedPassword = encrypt(dummyPassword, encryptionKey);
 
-    // IMAPHandlerが内部で復号化するので、暗号化されたパスワードをそのまま渡す
-    return new IMAPHandler([targetAccount], encryptionKey);
+    // ImapFlowHandlerが内部で復号化するので、暗号化されたパスワードをそのまま渡す
+    return new ImapFlowHandler([targetAccount], encryptionKey);
   };
 
   it('should list available IMAP accounts', async () => {
     const accountManager = new AccountManager();
-    const imapHandler = new IMAPHandler(accountManager.getImapAccounts(), encryptionKey); // ここもencryptionKeyを渡す
+    const imapHandler = new ImapFlowHandler(accountManager.getImapAccounts(), encryptionKey); // ここもencryptionKeyを渡す
     const accounts = imapHandler.getAvailableAccounts();
     
     console.log('Available IMAP accounts:', accounts.length > 0 ? `${accounts.length} accounts configured` : 'No IMAP accounts');

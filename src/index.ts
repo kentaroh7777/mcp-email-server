@@ -1,18 +1,17 @@
-import * as readline from 'readline';
 import { AccountManager } from './services/account-manager';
 import { GmailHandler } from './services/gmail';
-import { IMAPHandler } from './services/imap';
-import { MCPRequest, MCPResponse, McpError, Tool } from './types';
+import { ImapFlowHandler } from './services/imapflow-handler';
+import { MCPRequest, MCPResponse, McpError, Tool, EmailMessage } from './types';
 
 export default class McpEmailServer {
   private accountManager: AccountManager;
   private gmailHandler: GmailHandler;
-  private imapHandler: IMAPHandler;
+  private imapHandler: ImapFlowHandler;
 
   constructor() {
     this.accountManager = new AccountManager();
     this.gmailHandler = new GmailHandler(this.accountManager.getGmailAccounts());
-    this.imapHandler = new IMAPHandler(this.accountManager.getImapAccounts(), process.env.EMAIL_ENCRYPTION_KEY);
+    this.imapHandler = new ImapFlowHandler(this.accountManager.getImapAccounts(), process.env.EMAIL_ENCRYPTION_KEY || 'default-key');
   }
 
   public async handleRequest(request: MCPRequest): Promise<MCPResponse> {
@@ -326,15 +325,42 @@ export default class McpEmailServer {
   }
 
   private async _handleSearchAllEmails(args: any): Promise<any> {
+    // 全体的なタイムアウト制御を追加
+    const overallTimeout = parseInt(process.env.SEARCH_ALL_TIMEOUT_MS || '25000', 10);
+    
+    return new Promise(async (resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        reject(new Error(`search_all_emails timed out after ${overallTimeout}ms`));
+      }, overallTimeout);
+      
+      try {
+        const result = await this._performSearchAllEmails(args);
+        clearTimeout(timeoutId);
+        resolve(result);
+      } catch (error) {
+        clearTimeout(timeoutId);
+        reject(error);
+      }
+    });
+  }
+
+  private async _performSearchAllEmails(args: any): Promise<any> {
     const results: any[] = [];
     const errors: string[] = [];
 
-    // Gmail search
-    if (args.accounts === 'ALL' || args.accounts === 'GMAIL_ONLY') {
+    // args.accountsがundefinedの場合は'ALL'として扱う
+    const accountsType = args.accounts || 'ALL';
+
+    // Gmail search (並行処理の制限)
+    if (accountsType === 'ALL' || accountsType === 'GMAIL_ONLY') {
       const gmailAccounts = this.accountManager.getGmailAccounts();
       const gmailPromises = gmailAccounts.map(async (account) => {
         try {
-          const emails = await this.gmailHandler.searchEmails(account.name, args.query, args.limit);
+          const emailPromise = this.gmailHandler.searchEmails(account.name, args.query, args.limit);
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Individual Gmail search timeout')), 15000)
+          );
+          const emails = await Promise.race([emailPromise, timeoutPromise]) as EmailMessage[];
           return emails;
         } catch (error) {
           errors.push(`Gmail ${account.name}: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -352,15 +378,19 @@ export default class McpEmailServer {
       });
     }
 
-    // IMAP search
-    if (args.accounts === 'ALL' || args.accounts === 'IMAP_ONLY') {
+    // IMAP search (並行処理の制限)
+    if (accountsType === 'ALL' || accountsType === 'IMAP_ONLY') {
       const imapAccounts = this.accountManager.getImapAccounts();
       const imapPromises = imapAccounts.map(async (account) => {
         try {
-          const emails = await this.imapHandler.searchEmails(account.name, args.query, args.limit);
+          const emailPromise = this.imapHandler.searchEmails(account.name, args.query, args.limit);
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Individual ImapFlow search timeout')), 15000)
+          );
+          const emails = await Promise.race([emailPromise, timeoutPromise]) as EmailMessage[];
           return emails;
         } catch (error) {
-          errors.push(`IMAP ${account.name}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          errors.push(`ImapFlow ${account.name}: ${error instanceof Error ? error.message : 'Unknown error'}`);
           return [];
         }
       });
@@ -370,7 +400,7 @@ export default class McpEmailServer {
           results.push(...result.value);
         } else {
           const account = imapAccounts[index];
-          errors.push(`IMAP ${account.name}: ${result.reason instanceof Error ? result.reason.message : 'Unknown error'}`);
+          errors.push(`ImapFlow ${account.name}: ${result.reason instanceof Error ? result.reason.message : 'Unknown error'}`);
         }
       });
     }
@@ -394,16 +424,4 @@ export default class McpEmailServer {
   }
 }
 
-const server = new McpEmailServer();
-const rl = readline.createInterface({ input: process.stdin });
-
-rl.on('line', async (line) => {
-  try {
-    const request = JSON.parse(line) as MCPRequest;
-    const response = await server.handleRequest(request);
-    console.log(JSON.stringify(response));
-  } catch (error) {
-    const mcpError = (error instanceof McpError) ? error : new McpError(-32700, 'Parse error');
-    console.log(JSON.stringify({ jsonrpc: '2.0', id: null, error: mcpError.toObject() }));
-  }
-});
+// run-email-server.tsから使用されるため、ここでreadlineループは不要

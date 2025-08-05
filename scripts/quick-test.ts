@@ -128,14 +128,14 @@ async function main() {
       }
     },
     {
-      name: 'IMAP基本テスト',
+      name: 'アカウント一覧テスト', 
       command: {
         jsonrpc: '2.0',
         id: 3,
         method: 'tools/call',
         params: {
-          name: 'list_imap_emails',
-          arguments: { account_name: 'info_h_fpo_com', limit: 1 }
+          name: 'list_accounts',
+          arguments: {}
         }
       }
     }

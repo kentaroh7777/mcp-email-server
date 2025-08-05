@@ -396,8 +396,8 @@ export class TestHelper {
     const requiredFiles = [
       'src/index.ts',
       'src/services/gmail.ts',
-      'src/services/imap.ts',
-      'src/utils/crypto.ts',
+      'src/services/imapflow-handler.ts',
+      'src/crypto.ts',
       'src/types.ts',
       'package.json',
       'tsconfig.json',

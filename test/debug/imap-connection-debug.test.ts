@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'vitest';
-import { IMAPHandler } from '../../src/services/imap';
+import { ImapFlowHandler } from '../../src/services/imapflow-handler.js';
 import { ImapAccount } from '../../src/types';
-import { encrypt } from '../../src/utils/crypto';
+import { encrypt } from '../../src/crypto.js';
 
 describe('IMAP Connection Debug', () => {
   test('IMAP account should connect and decrypt password successfully', async () => {
@@ -27,7 +27,7 @@ describe('IMAP Connection Debug', () => {
     console.log(`Attempting IMAP connection for account: ${imapAccount.name}`);
 
     try {
-      const imapHandler = new IMAPHandler([imapAccount], encryptionKey);
+      const imapHandler = new ImapFlowHandler([imapAccount], encryptionKey);
 
     } catch (error: any) {
       console.error(`IMAP connection debug test failed for ${imapAccount.name}: ${error.message}`);

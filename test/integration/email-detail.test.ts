@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeAll } from 'vitest';
 import { TestHelper } from '../utils/helpers.js';
-import { encrypt, decrypt } from '../../src/utils/crypto';
-import { IMAPHandler } from '../../src/services/imap';
+import { encrypt, decrypt } from '../../src/utils/crypto.js';
+import { ImapFlowHandler } from '../../src/services/imapflow-handler.js';
 import { ImapAccount } from '../../src/types';
 import { AccountManager } from '../../src/services/account-manager';
 
@@ -120,7 +120,7 @@ describe('Email Detail Tests', () => {
       }
 
       // IMAPHandlerを直接インスタンス化（内部で復号化される）
-      const imapHandler = new IMAPHandler([originalImapAccount], encryptionKey);
+      const imapHandler = new ImapFlowHandler([originalImapAccount], encryptionKey);
       const accountName = originalImapAccount.name;
 
       console.log(`Testing IMAP email detail for account: ${accountName}`);
@@ -137,7 +137,13 @@ describe('Email Detail Tests', () => {
           return;
         }
 
-        // 最初のメールの詳細を取得
+        // デバッグ情報を表示
+        console.log(`Found ${listData.length} emails in IMAP account:`);
+        listData.forEach((email, index) => {
+          console.log(`  ${index + 1}. ID: ${email.id}, Subject: ${email.subject}, Date: ${email.date}`);
+        });
+
+        // 最新のメールの詳細を取得（配列の最初の要素 - 最新のメール）
         const emailId = listData[0].id;
         console.log(`Getting detail for email ID: ${emailId}`);
 
@@ -210,7 +216,7 @@ describe('Email Detail Tests', () => {
             continue;
           }
 
-          const emailId = listData[0].id;
+          const emailId = listData[listData.length - 1].id; // 最新のメールを取得
           
           // メール詳細を取得
           const detailResponse = await helper.callTool('get_email_detail', {
