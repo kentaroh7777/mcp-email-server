@@ -1,12 +1,15 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, vi } from 'vitest';
 import { AccountManager } from '../../src/services/account-manager.js';
 import { ImapFlowHandler } from '../../src/services/imapflow-handler.js';
 import { checkTestPrerequisites, getTestAccountName } from '../utils/helpers.js';
 import { encrypt, decrypt } from '../../src/crypto.js';
 import { ImapAccount } from '../../src/types';
+import McpEmailServer from '../../src/index.js';
+import { ConnectionManager } from '../../src/connection-manager.js';
 
 describe('Simple IMAP Handler Test', () => {
   let encryptionKey: string;
+  let mcpServer: McpEmailServer;
 
   beforeAll(() => {
     const { canRun, message } = checkTestPrerequisites();
@@ -20,6 +23,8 @@ describe('Simple IMAP Handler Test', () => {
     if (!encryptionKey) {
       throw new Error('EMAIL_ENCRYPTION_KEY is not defined. Please set it in your .env file.');
     }
+    
+    mcpServer = new McpEmailServer();
   });
 
   // ImapFlowHandlerのインスタンスを生成するヘルパー関数
@@ -43,14 +48,46 @@ describe('Simple IMAP Handler Test', () => {
 
   it('should list available IMAP accounts', async () => {
     const accountManager = new AccountManager();
-    const imapHandler = new ImapFlowHandler(accountManager.getImapAccounts(), encryptionKey); // ここもencryptionKeyを渡す
+    const imapHandler = new ImapFlowHandler(accountManager.getImapAccounts(), encryptionKey);
     const accounts = imapHandler.getAvailableAccounts();
     
     console.log('Available IMAP accounts:', accounts.length > 0 ? `${accounts.length} accounts configured` : 'No IMAP accounts');
     expect(accounts).toBeDefined();
     expect(Array.isArray(accounts)).toBe(true);
-    // IMAPアカウントが設定されていない場合もあるので、0以上であることを確認
     expect(accounts.length).toBeGreaterThanOrEqual(0);
+  });
+
+  it('should use ConnectionManager for IMAP operations', async () => {
+    // ConnectionManager統合テスト
+    const mockConnectionManager = {
+      getImapHandler: vi.fn().mockResolvedValue({
+        testConnection: vi.fn().mockResolvedValue(undefined),
+        listEmails: vi.fn().mockResolvedValue([])
+      })
+    };
+
+    (mcpServer as any).connectionManager = mockConnectionManager;
+    (mcpServer as any).accountManager = {
+      getAccount: vi.fn().mockReturnValue({
+        name: 'test_imap_account',
+        type: 'imap',
+        config: {}
+      })
+    };
+
+    const testRequest = {
+      jsonrpc: '2.0' as const,
+      method: 'tools/call',
+      params: {
+        name: 'test_connection',
+        arguments: { account_name: 'test_imap_account' }
+      },
+      id: 1
+    };
+
+    const response = await mcpServer.handleRequest(testRequest);
+    expect(response.result.status).toBe('connected');
+    expect(mockConnectionManager.getImapHandler).toHaveBeenCalledWith('test_imap_account');
   });
 
   it.skipIf(!getTestAccountName('imap'))('should get unread count for IMAP account', async () => {
@@ -67,10 +104,16 @@ describe('Simple IMAP Handler Test', () => {
       expect(unreadCount).toBeGreaterThanOrEqual(0);
     } catch (error) {
       console.log(`Account ${accountName} connection failed (expected in some cases):`, error);
-      // IMAP接続エラーは予期される場合があるので、テストは継続
       expect(error).toBeDefined();
     }
   }, 10000);
+
+  it('should verify no duplicate instances exist', () => {
+    // 重複インスタンス作成の完全解消確認
+    expect((mcpServer as any).gmailHandler).toBeUndefined();
+    expect((mcpServer as any).imapHandler).toBeUndefined();
+    expect((mcpServer as any).connectionManager).toBeInstanceOf(ConnectionManager);
+  });
 
   it.skipIf(!getTestAccountName('imap'))('should list emails from IMAP account', async () => {
     const accountName = getTestAccountName('imap')!;
@@ -94,7 +137,6 @@ describe('Simple IMAP Handler Test', () => {
       }
     } catch (error) {
       console.log(`Account ${accountName} email listing failed (expected in some cases):`, error);
-      // IMAP接続エラーは予期される場合があるので、テストは継続
       expect(error).toBeDefined();
     }
   }, 10000);

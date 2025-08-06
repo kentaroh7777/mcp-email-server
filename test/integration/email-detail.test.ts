@@ -1,17 +1,21 @@
-import { describe, test, expect, beforeAll } from 'vitest';
+import { describe, test, expect, beforeAll, vi } from 'vitest';
 import { TestHelper } from '../utils/helpers.js';
 import { encrypt, decrypt } from '../../src/utils/crypto.js';
 import { ImapFlowHandler } from '../../src/services/imapflow-handler.js';
 import { ImapAccount } from '../../src/types';
 import { AccountManager } from '../../src/services/account-manager';
+import McpEmailServer from '../../src/index.js';
+import { ConnectionManager } from '../../src/connection-manager.js';
 
 describe('Email Detail Tests', () => {
   let helper: TestHelper;
   let configuredAccounts: { gmail: string[]; imap: string[]; xserver: string[] };
+  let mcpServer: McpEmailServer;
 
   beforeAll(() => {
     helper = new TestHelper();
     configuredAccounts = helper.getConfiguredAccounts();
+    mcpServer = new McpEmailServer();
     
     const totalAccounts = configuredAccounts.gmail.length + configuredAccounts.imap.length + configuredAccounts.xserver.length;
     console.log(`テスト環境チェック: Gmail ${configuredAccounts.gmail.length}アカウント, IMAP ${configuredAccounts.imap.length}アカウント, XServer ${configuredAccounts.xserver.length}アカウント`);
@@ -253,6 +257,76 @@ describe('Email Detail Tests', () => {
       expect(successfulTests).toBeGreaterThan(0);
       expect(totalTests).toBeGreaterThan(0);
     }, 60000);
+  });
+
+  describe('ConnectionManager Integration Tests', () => {
+    test('should use ConnectionManager for email detail operations', async () => {
+      // ConnectionManager統合テスト
+      expect((mcpServer as any).connectionManager).toBeInstanceOf(ConnectionManager);
+      expect((mcpServer as any).gmailHandler).toBeUndefined();
+      expect((mcpServer as any).imapHandler).toBeUndefined();
+    });
+
+    test('should maintain consistency between tools using ConnectionManager', async () => {
+      const mockConnectionManager = {
+        getGmailHandler: vi.fn().mockResolvedValue({
+          listEmails: vi.fn().mockResolvedValue([{
+            id: 'test-email-id',
+            subject: 'Test Subject',
+            from: 'test@example.com',
+            date: new Date().toISOString()
+          }]),
+          getEmailDetail: vi.fn().mockResolvedValue({
+            id: 'test-email-id',
+            subject: 'Test Subject',
+            from: 'test@example.com',
+            body: 'Test body content',
+            attachments: []
+          })
+        })
+      };
+
+      (mcpServer as any).connectionManager = mockConnectionManager;
+      (mcpServer as any).accountManager = {
+        getAccount: vi.fn().mockReturnValue({
+          name: 'test-gmail-account',
+          type: 'gmail',
+          config: {}
+        })
+      };
+
+      // list_emails実行
+      const listResponse = await mcpServer.handleRequest({
+        jsonrpc: '2.0',
+        method: 'tools/call',
+        params: {
+          name: 'list_emails',
+          arguments: { account_name: 'test-gmail-account', limit: 1 }
+        },
+        id: 1
+      });
+
+      expect(listResponse.result).toBeDefined();
+      expect(Array.isArray(listResponse.result)).toBe(true);
+
+      // get_email_detail実行（同じConnectionManagerインスタンス使用）
+      const detailResponse = await mcpServer.handleRequest({
+        jsonrpc: '2.0',
+        method: 'tools/call',
+        params: {
+          name: 'get_email_detail',
+          arguments: { account_name: 'test-gmail-account', email_id: 'test-email-id' }
+        },
+        id: 2
+      });
+
+      expect(detailResponse.result).toBeDefined();
+      expect(detailResponse.result.id).toBe('test-email-id');
+      
+      // 同じConnectionManagerインスタンスが使用されることを確認
+      expect(mockConnectionManager.getGmailHandler).toHaveBeenCalledTimes(2);
+      expect(mockConnectionManager.getGmailHandler).toHaveBeenCalledWith('test-gmail-account');
+    });
   });
 
   describe('Email Detail Error Handling', () => {

@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeAll, it } from 'vitest';
+import { describe, test, expect, beforeAll, it, vi } from 'vitest';
 import { spawn, ChildProcess } from 'child_process';
 import path from 'path';
 import { TestHelper, getTestAccountName, checkTestPrerequisites, getTestDateRange, getTestEnvironment } from '../utils/helpers.js';
@@ -7,6 +7,8 @@ import { ImapFlowHandler } from '../../src/services/imapflow-handler.js';
 import { ImapAccount } from '../../src/types';
 import { decrypt } from '../../src/crypto.js';
 import { GmailHandler } from '../../src/services/gmail.js';
+import McpEmailServer from '../../src/index.js';
+import { ConnectionManager } from '../../src/connection-manager.js';
 
 describe('IMAP Tools Timeout Prevention', () => {
   let helper: TestHelper;
@@ -16,6 +18,7 @@ describe('IMAP Tools Timeout Prevention', () => {
 
   let gmailHandler: GmailHandler;
   let testEnv: ReturnType<typeof getTestEnvironment>;
+  let mcpServer: McpEmailServer;
 
   beforeAll(() => {
     const { canRun, message } = checkTestPrerequisites();
@@ -29,6 +32,7 @@ describe('IMAP Tools Timeout Prevention', () => {
     configuredAccounts = helper.getConfiguredAccounts();
     gmailHandler = new GmailHandler([]);
     testEnv = getTestEnvironment();
+    mcpServer = new McpEmailServer();
   });
 
   // Test helper function to run MCP command with timeout
@@ -305,6 +309,67 @@ describe('IMAP Tools Timeout Prevention', () => {
       expect(validEmails.length).toBe(emailDates.length); // 全てのメールが前日以降であることを確認
     }
   }, 15000);
+
+  it('should use ConnectionManager without duplicate instances', () => {
+    // 重複インスタンス作成の完全解消確認
+    expect((mcpServer as any).connectionManager).toBeInstanceOf(ConnectionManager);
+    expect((mcpServer as any).gmailHandler).toBeUndefined();
+    expect((mcpServer as any).imapHandler).toBeUndefined();
+  });
+
+  it('should maintain ConnectionManager consistency during timeout scenarios', async () => {
+    const mockConnectionManager = {
+      getImapHandler: vi.fn().mockResolvedValue({
+        listEmails: vi.fn().mockResolvedValue([])
+      }),
+      testConnection: vi.fn().mockResolvedValue({
+        success: true,
+        accountName: 'test-timeout-account',
+        accountType: 'imap',
+        message: 'Connection successful'
+      })
+    };
+
+    (mcpServer as any).connectionManager = mockConnectionManager;
+    (mcpServer as any).accountManager = {
+      getAccount: vi.fn().mockReturnValue({
+        name: 'test-timeout-account',
+        type: 'imap',
+        config: {}
+      })
+    };
+
+    // test_connection実行
+    const testResponse = await mcpServer.handleRequest({
+      jsonrpc: '2.0',
+      method: 'tools/call',
+      params: {
+        name: 'test_connection',
+        arguments: { account_name: 'test-timeout-account' }
+      },
+      id: 1
+    });
+
+    // list_emails実行
+    const listResponse = await mcpServer.handleRequest({
+      jsonrpc: '2.0',
+      method: 'tools/call',
+      params: {
+        name: 'list_emails',
+        arguments: { account_name: 'test-timeout-account', limit: 1 }
+      },
+      id: 2
+    });
+
+    // 一貫性確認
+    expect(testResponse.result.status).toBe('connected');
+    expect(listResponse.result).toBeDefined();
+    expect(Array.isArray(listResponse.result)).toBe(true);
+    
+    // 同じConnectionManagerが使用されることを確認
+    expect(mockConnectionManager.testConnection).toHaveBeenCalledWith('test-timeout-account');
+    expect(mockConnectionManager.getImapHandler).toHaveBeenCalledWith('test-timeout-account');
+  });
 });
 
 describe.skip('Timezone Handling', () => {
