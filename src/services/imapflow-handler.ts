@@ -348,6 +348,26 @@ export class ImapFlowHandler {
     return this.accounts.map(acc => acc.name);
   }
 
+  async testConnection(accountName: string): Promise<void> {
+    let client: ImapFlow | null = null;
+    try {
+      client = await this.getConnection(accountName);
+      // 軽量な接続テストのため、INBOXを開く
+      await this.openBox(client);
+    } catch (error: any) {
+      throw new Error(`IMAP connection test failed for account ${accountName}: ${error.message}`);
+    } finally {
+      if (client) {
+        try {
+          await client.logout();
+        } catch (e) {
+          // Ignore logout errors
+        }
+        this.connectionPool.delete(accountName);
+      }
+    }
+  }
+
   async sendEmail(accountName: string, params: SendEmailParams): Promise<SendEmailResult> {
     try {
       const smtpConfig = this.loadSMTPConfig(accountName);

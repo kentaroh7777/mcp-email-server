@@ -18,7 +18,7 @@ describe('Connection Tests', () => {
       expect(response.result).toBeDefined();
       
       // MCP形式のレスポンスからデータを抽出
-      const data = response.result.content?.[0]?.text ? JSON.parse(response.result.content[0].text) : null;
+      const data = response.result;
       expect(data).toBeDefined();
       expect(data.accounts).toBeDefined();
       expect(Array.isArray(data.accounts)).toBe(true);
@@ -47,7 +47,7 @@ describe('Connection Tests', () => {
       const response = await helper.callTool('list_accounts', {});
       expect(response.error).toBeUndefined();
       
-      const data = response.result.content?.[0]?.text ? JSON.parse(response.result.content[0].text) : null;
+      const data = response.result;
       const accounts = data?.accounts || [];
       const hasExpectedType = accounts.some((acc: any) => acc.type === expectedType);
       
@@ -176,7 +176,7 @@ describe('Connection Tests', () => {
       });
       
       expect(response.error).toBeUndefined();
-      const data = response.result.content?.[0]?.text ? JSON.parse(response.result.content[0].text) : null;
+      const data = response.result;
       expect(data).toBeDefined();
       expect(data.emails).toBeDefined();
       expect(Array.isArray(data.emails)).toBe(true);
@@ -195,7 +195,7 @@ describe('Connection Tests', () => {
         limit: 5
       });
       expect(response.error).toBeUndefined();
-      const data = response.result.content?.[0]?.text ? JSON.parse(response.result.content[0].text) : null;
+      const data = response.result;
       expect(data).toBeDefined();
       expect(data.emails).toBeDefined();
       expect(Array.isArray(data.emails)).toBe(true);
@@ -210,7 +210,7 @@ describe('Connection Tests', () => {
         limit: 5
       });
       expect(response.error).toBeUndefined();
-      const data = response.result.content?.[0]?.text ? JSON.parse(response.result.content[0].text) : null;
+      const data = response.result;
       expect(data).toBeDefined();
       expect(data.emails).toBeDefined();
       expect(Array.isArray(data.emails)).toBe(true);
@@ -227,7 +227,7 @@ describe('Connection Tests', () => {
       expect(response.result).toBeDefined();
       
       // MCP形式のレスポンスからデータを抽出
-      const data = response.result.content?.[0]?.text ? JSON.parse(response.result.content[0].text) : null;
+      const data = response.result;
       expect(data).toBeDefined();
       
       // 実際の状態検証: 統計情報の構造が正しいか（統合化後の新構造）
@@ -265,7 +265,7 @@ describe('Connection Tests', () => {
             // アカウントが見つからない場合のエラーをチェック
             expect(response.error.message).toContain('Account not found');
           } else {
-            const data = response.result.content?.[0]?.text ? JSON.parse(response.result.content[0].text) : null;
+            const data = response.result;
             expect(data).toBeDefined();
             expect(data.emails).toBeDefined();
             expect(Array.isArray(data.emails)).toBe(true);
@@ -294,7 +294,7 @@ describe('Connection Tests', () => {
           if (response.error) {
             expect(response.error.message).toContain('Account not found');
           } else {
-            const data = response.result.content?.[0]?.text ? JSON.parse(response.result.content[0].text) : null;
+            const data = response.result;
             expect(data).toBeDefined();
             expect(data.emails).toBeDefined();
             expect(Array.isArray(data.emails)).toBe(true);
@@ -332,8 +332,8 @@ describe('Connection Tests', () => {
       
       // 新しい複数メール対応のレスポンス形式も確認
       const response = verification.details?.response;
-      if (response?.result?.content?.[0]?.text) {
-        const data = JSON.parse(response.result.content[0].text);
+      if (response?.result) {
+        const data = response.result;
         expect(data).toHaveProperty('total', 1);
         expect(data).toHaveProperty('successful', 0);
         expect(data).toHaveProperty('failed', 1);

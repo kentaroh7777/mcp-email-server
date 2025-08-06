@@ -20,9 +20,9 @@ describe('MCPEmailProtocolHandler', () => {
 
       const response = await handler.handleRequest(request);
 
-      const data = JSON.parse(response.result.content[0].text);
+      const data = response.result;
       expect(data).toMatchObject({
-        protocolVersion: '1.0',
+        protocolVersion: '2024-11-05',
         serverInfo: {
           name: 'mcp-email-server',
           version: '1.0.0'
@@ -40,7 +40,7 @@ describe('MCPEmailProtocolHandler', () => {
 
       const response = await handler.handleRequest(request);
 
-      const data = JSON.parse(response.result.content[0].text);
+      const data = response.result;
       expect(data).toHaveProperty('tools');
       expect(Array.isArray(data.tools)).toBe(true);
       expect(data.tools.length).toBeGreaterThan(0);
@@ -181,7 +181,7 @@ describe('MCPEmailProtocolHandler', () => {
       expect(response.id).toBe(5);
       
       // mcp-todoist形式のレスポンスをパース
-      const data = response.result.content?.[0]?.text ? JSON.parse(response.result.content[0].text) : null;
+      const data = response.result;
       expect(data).toBeDefined();
       expect(data).toHaveProperty('accounts');
       expect(Array.isArray(data.accounts)).toBe(true);
@@ -434,7 +434,7 @@ describe('MCPEmailProtocolHandler', () => {
       expect(response.id).toBe(16);
       
       // 改良されたレスポンス構造を確認
-      const data = response.result.content?.[0]?.text ? JSON.parse(response.result.content[0].text) : null;
+      const data = response.result;
       expect(data).toBeDefined();
       expect(data).toHaveProperty('accounts');
       expect(data).toHaveProperty('summary');

@@ -7,11 +7,13 @@ export default class McpEmailServer {
   private accountManager: AccountManager;
   private gmailHandler: GmailHandler;
   private imapHandler: ImapFlowHandler;
+  private encryptionKey: string;
 
   constructor() {
+    this.encryptionKey = process.env.EMAIL_ENCRYPTION_KEY || 'default-key';
     this.accountManager = new AccountManager();
     this.gmailHandler = new GmailHandler(this.accountManager.getGmailAccounts());
-    this.imapHandler = new ImapFlowHandler(this.accountManager.getImapAccounts(), process.env.EMAIL_ENCRYPTION_KEY || 'default-key');
+    this.imapHandler = new ImapFlowHandler(this.accountManager.getImapAccounts(), this.encryptionKey);
   }
 
   public async handleRequest(request: MCPRequest): Promise<MCPResponse> {
@@ -45,12 +47,7 @@ export default class McpEmailServer {
       return {
         jsonrpc: '2.0',
         id: request.id,
-        result: {
-          content: [{
-            type: 'text',
-            text: JSON.stringify(result)
-          }]
-        },
+        result: result,
       };
     } catch (error) {
       const mcpError = (error instanceof McpError) ? error : new McpError(-32000, (error as any).message);
@@ -64,7 +61,11 @@ export default class McpEmailServer {
 
   private getInitializeResult() {
     return {
-      protocolVersion: '1.0',
+      protocolVersion: '2024-11-05',
+      capabilities: {
+        tools: { listChanged: true },
+        resources: { subscribe: true, listChanged: true }
+      },
       serverInfo: {
         name: 'mcp-email-server',
         version: '1.0.0',
@@ -299,8 +300,22 @@ export default class McpEmailServer {
         case 'list_accounts':
           return { accounts: this.accountManager.getAllAccounts().map(acc => ({ name: acc.name, type: acc.type })) };
         case 'test_connection':
-          // TODO: Implement actual connection test
-          return { status: 'connected', account: accountName, accountType: account.type, testResult: 'Dummy connection test successful' };
+          try {
+            if (account.type === 'gmail') {
+              // Gmail接続テスト - 軽量なメソッドを使用
+              const gmailHandler = new (await import('./services/gmail.js')).GmailHandler([account]);
+              await gmailHandler.testConnection(accountName!);
+              return { status: 'connected', account: accountName, accountType: account.type, testResult: 'Gmail connection test successful' };
+            } else if (account.type === 'imap') {
+              // IMAP接続テスト - 既存のimapHandlerインスタンスを使用
+              await this.imapHandler.testConnection(accountName!);
+              return { status: 'connected', account: accountName, accountType: account.type, testResult: 'IMAP connection test successful' };
+            } else {
+              throw new Error(`Unsupported account type: ${account.type}`);
+            }
+          } catch (error: any) {
+            return { status: 'failed', account: accountName, accountType: account.type, testResult: `Connection test failed: ${error.message}` };
+          }
         case 'get_account_stats':
           const allAccounts = this.accountManager.getAllAccounts();
           const gmailCount = allAccounts.filter(acc => acc.type === 'gmail').length;

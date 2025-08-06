@@ -38,7 +38,7 @@ describe('Email Detail Tests', () => {
       });
 
       expect(listResponse.error).toBeUndefined();
-      const listData = JSON.parse(listResponse.result.content[0].text);
+      const listData = listResponse.result;
       expect(listData).toBeDefined();
       expect(Array.isArray(listData)).toBe(true);
 
@@ -57,7 +57,7 @@ describe('Email Detail Tests', () => {
       });
 
       expect(detailResponse.error).toBeUndefined();
-      const detailData = JSON.parse(detailResponse.result.content[0].text);
+      const detailData = detailResponse.result;
       
       // 詳細データの検証
       expect(detailData).toBeDefined();
@@ -209,7 +209,7 @@ describe('Email Detail Tests', () => {
             continue;
           }
 
-          const listData = JSON.parse(listResponse.result.content[0].text);
+          const listData = listResponse.result;
           
           if (!listData || listData.length === 0) {
             console.log(`  No emails found in account`);
@@ -229,7 +229,7 @@ describe('Email Detail Tests', () => {
             continue;
           }
 
-          const detailData = JSON.parse(detailResponse.result.content[0].text);
+          const detailData = detailResponse.result;
           
           // 基本的な検証
           expect(detailData).toBeDefined();

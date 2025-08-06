@@ -206,6 +206,16 @@ export class GmailHandler {
     return gmail;
   }
 
+  async testConnection(accountName: string): Promise<void> {
+    try {
+      const gmail = await this.authenticate(accountName);
+      // 軽量なプロファイル取得で接続をテスト
+      await gmail.users.getProfile({ userId: 'me' });
+    } catch (error: any) {
+      throw new McpError(-32000, `Authentication failed for Gmail account: ${accountName}`);
+    }
+  }
+
   getAvailableAccounts(): string[] {
     return this.accounts.map(acc => acc.name);
   }

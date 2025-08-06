@@ -8,8 +8,13 @@ export default defineConfig({
     hookTimeout: 30000,
     teardownTimeout: 30000,
     setupFiles: ['./test/utils/setup.ts'],
-    include: ['test/**/*.test.ts', 'test/**/*.test.js'],
+    include: ['test/**/*.test.ts', 'test/**/*.test.js', 'src/tests/**/*.{test,spec}.{js,ts}'],
     exclude: ['node_modules/**', 'dist/**'],
+    coverage: {
+      provider: 'v8',
+      include: ['src/**/*.{js,ts}'],
+      exclude: ['src/tests/**', '**/*.d.ts']
+    },
     // ログ監視設定：標準出力のエラーパターンを監視
     /*
     onConsoleLog(log, type) {

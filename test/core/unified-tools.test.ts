@@ -21,7 +21,7 @@ describe('Unified Tools Tests', () => {
 
       const response = await handler.handleRequest(request);
       expect(response.error).toBeUndefined();
-      const data = JSON.parse(response.result.content[0].text);
+      const data = response.result;
       expect(data.tools).toBeDefined();
       
       const toolNames = data.tools.map((tool: any) => tool.name);
@@ -48,7 +48,7 @@ describe('Unified Tools Tests', () => {
       };
 
       const response = await handler.handleRequest(request);
-      const data = JSON.parse(response.result.content[0].text);
+      const data = response.result;
       const unifiedTools = ['list_emails', 'search_emails', 'get_email_detail', 'archive_email', 'send_email'];
       
       for (const toolName of unifiedTools) {
@@ -72,7 +72,7 @@ describe('Unified Tools Tests', () => {
       };
 
       const response = await handler.handleRequest(request);
-      const data = JSON.parse(response.result.content[0].text);
+      const data = response.result;
       const sendEmailTool = data.tools.find((t: any) => t.name === 'send_email');
       
       expect(sendEmailTool).toBeDefined();
@@ -280,8 +280,8 @@ describe('Unified Tools Tests', () => {
 
       // 従来のレスポンス形式も確認
       const response = verification.details?.response;
-      if (response?.result?.content?.[0]?.text) {
-        const result = JSON.parse(response.result.content[0].text);
+      if (response?.result) {
+        const result = response.result;
         expect(result).toHaveProperty('success', false);
         expect(result).toHaveProperty('error');
         expect(result.error).toContain('SMTP configuration not found for account');
@@ -304,9 +304,9 @@ describe('Unified Tools Tests', () => {
       const response = await handler.handleRequest(request);
       
       expect(response.error).toBeUndefined();
-      expect(response.result?.content?.[0]?.text).toBeDefined();
+      expect(response.result).toBeDefined();
 
-      const statsData = JSON.parse(response.result.content[0].text);
+      const statsData = response.result;
       
       // 新しい構造を確認
       expect(statsData.accounts).toBeDefined();
@@ -339,7 +339,7 @@ describe('Unified Tools Tests', () => {
         };
 
         const toolsResponse = await handler.handleRequest(toolsRequest);
-        const data = JSON.parse(toolsResponse.result.content[0].text);
+        const data = toolsResponse.result;
         const toolNames = data.tools.map((tool: any) => tool.name);
         
         expect(toolNames).toContain(toolName);
