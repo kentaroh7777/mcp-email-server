@@ -1,19 +1,17 @@
 import { AccountManager } from './services/account-manager';
-import { GmailHandler } from './services/gmail';
-import { ImapFlowHandler } from './services/imapflow-handler';
+import { ConnectionManager } from './connection-manager.js';
 import { MCPRequest, MCPResponse, McpError, Tool, EmailMessage } from './types';
+import { ConnectionResult } from './types/connection.js';
 
 export default class McpEmailServer {
   private accountManager: AccountManager;
-  private gmailHandler: GmailHandler;
-  private imapHandler: ImapFlowHandler;
-  private encryptionKey: string;
+  private connectionManager: ConnectionManager;
 
   constructor() {
-    this.encryptionKey = process.env.EMAIL_ENCRYPTION_KEY || 'default-key';
     this.accountManager = new AccountManager();
-    this.gmailHandler = new GmailHandler(this.accountManager.getGmailAccounts());
-    this.imapHandler = new ImapFlowHandler(this.accountManager.getImapAccounts(), this.encryptionKey);
+    
+    // ConnectionManager統合：重複インスタンス作成を統一管理に変更
+    this.connectionManager = new ConnectionManager(this.accountManager);
   }
 
   public async handleRequest(request: MCPRequest): Promise<MCPResponse> {
@@ -73,7 +71,7 @@ export default class McpEmailServer {
     };
   }
 
-  private getTools(): { tools: Tool[] } {
+  public getTools(): { tools: Tool[] } {
     const unifiedTools: Tool[] = [
       {
         name: 'list_emails',
@@ -262,60 +260,65 @@ export default class McpEmailServer {
       switch (toolName) {
         case 'list_emails':
           if (account.type === 'gmail') {
-            return await this.gmailHandler.listEmails(accountName!, args);
+            // 重複削除：統一接続管理を使用
+            const handler = await this.connectionManager.getGmailHandler(accountName!);
+            return await handler.listEmails(accountName!, args);
           } else if (account.type === 'imap') {
-            return await this.imapHandler.listEmails(accountName!, args);
+            const handler = await this.connectionManager.getImapHandler(accountName!);
+            return await handler.listEmails(accountName!, args);
           }
           break;
         case 'search_emails':
           if (account.type === 'gmail') {
-            return await this.gmailHandler.searchEmails(accountName!, args.query, args.limit);
+            const handler = await this.connectionManager.getGmailHandler(accountName!);
+            return await handler.searchEmails(accountName!, args.query, args.limit);
           } else if (account.type === 'imap') {
-            return await this.imapHandler.searchEmails(accountName!, args.query, args.limit);
+            const handler = await this.connectionManager.getImapHandler(accountName!);
+            return await handler.searchEmails(accountName!, args.query, args.limit);
           }
           break;
         case 'get_email_detail':
           if (account.type === 'gmail') {
-            return await this.gmailHandler.getEmailDetail(accountName!, args.email_id);
+            const handler = await this.connectionManager.getGmailHandler(accountName!);
+            return await handler.getEmailDetail(accountName!, args.email_id);
           } else if (account.type === 'imap') {
-            return await this.imapHandler.getEmailDetail(accountName!, args.email_id);
+            const handler = await this.connectionManager.getImapHandler(accountName!);
+            return await handler.getEmailDetail(accountName!, args.email_id);
           }
           break;
         case 'archive_email':
           if (account.type === 'gmail') {
-            return await this.gmailHandler.archiveEmail(accountName!, args.email_id, args.remove_unread);
+            const handler = await this.connectionManager.getGmailHandler(accountName!);
+            return await handler.archiveEmail(accountName!, args.email_id, args.remove_unread);
           } else if (account.type === 'imap') {
-            return await this.imapHandler.archiveEmail(accountName!, args.email_id, args.remove_unread);
+            const handler = await this.connectionManager.getImapHandler(accountName!);
+            return await handler.archiveEmail(accountName!, args.email_id, args.remove_unread);
           }
           break;
         case 'send_email':
           if (account.type === 'gmail') {
-            const result = await this.gmailHandler.sendEmail(accountName!, args);
+            const handler = await this.connectionManager.getGmailHandler(accountName!);
+            const result = await handler.sendEmail(accountName!, args);
             return { success: result.success, messageId: result.messageId, error: result.error };
           } else if (account.type === 'imap') {
-            const result = await this.imapHandler.sendEmail(accountName!, args);
+            const handler = await this.connectionManager.getImapHandler(accountName!);
+            const result = await handler.sendEmail(accountName!, args);
             return { success: result.success, messageId: result.messageId, error: result.error };
           }
           break;
         case 'list_accounts':
           return { accounts: this.accountManager.getAllAccounts().map(acc => ({ name: acc.name, type: acc.type })) };
         case 'test_connection':
-          try {
-            if (account.type === 'gmail') {
-              // Gmail接続テスト - 軽量なメソッドを使用
-              const gmailHandler = new (await import('./services/gmail.js')).GmailHandler([account]);
-              await gmailHandler.testConnection(accountName!);
-              return { status: 'connected', account: accountName, accountType: account.type, testResult: 'Gmail connection test successful' };
-            } else if (account.type === 'imap') {
-              // IMAP接続テスト - 既存のimapHandlerインスタンスを使用
-              await this.imapHandler.testConnection(accountName!);
-              return { status: 'connected', account: accountName, accountType: account.type, testResult: 'IMAP connection test successful' };
-            } else {
-              throw new Error(`Unsupported account type: ${account.type}`);
-            }
-          } catch (error: any) {
-            return { status: 'failed', account: accountName, accountType: account.type, testResult: `Connection test failed: ${error.message}` };
-          }
+          // 重複削除：統一接続管理のtestConnectionを使用
+          const connectionResult: ConnectionResult = await this.connectionManager.testConnection(accountName!);
+          
+          // 既存API互換性維持：戻り値形式を既存形式に変換
+          return {
+            status: connectionResult.success ? 'connected' : 'failed',
+            account: connectionResult.accountName,
+            accountType: connectionResult.accountType,
+            testResult: connectionResult.message
+          };
         case 'get_account_stats':
           const allAccounts = this.accountManager.getAllAccounts();
           const gmailCount = allAccounts.filter(acc => acc.type === 'gmail').length;
@@ -371,7 +374,9 @@ export default class McpEmailServer {
       const gmailAccounts = this.accountManager.getGmailAccounts();
       const gmailPromises = gmailAccounts.map(async (account) => {
         try {
-          const emailPromise = this.gmailHandler.searchEmails(account.name, args.query, args.limit);
+          // 重複削除：ConnectionManager経由でハンドラー取得
+          const handler = await this.connectionManager.getGmailHandler(account.name);
+          const emailPromise = handler.searchEmails(account.name, args.query, args.limit);
           const timeoutPromise = new Promise((_, reject) => 
             setTimeout(() => reject(new Error('Individual Gmail search timeout')), 15000)
           );
@@ -398,7 +403,9 @@ export default class McpEmailServer {
       const imapAccounts = this.accountManager.getImapAccounts();
       const imapPromises = imapAccounts.map(async (account) => {
         try {
-          const emailPromise = this.imapHandler.searchEmails(account.name, args.query, args.limit);
+          // 重複削除：ConnectionManager経由でハンドラー取得
+          const handler = await this.connectionManager.getImapHandler(account.name);
+          const emailPromise = handler.searchEmails(account.name, args.query, args.limit);
           const timeoutPromise = new Promise((_, reject) => 
             setTimeout(() => reject(new Error('Individual ImapFlow search timeout')), 15000)
           );
