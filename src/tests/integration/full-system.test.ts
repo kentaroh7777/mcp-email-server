@@ -1,14 +1,10 @@
 // src/tests/integration/full-system.test.ts
 // 設計書：単体テスト、統合テスト、回帰テストの実装
 
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
+import { describe, it, expect, beforeAll, vi } from 'vitest'
 import McpEmailServer from '../../index.js'
 import { ConnectionManager } from '../../connection-manager.js'
 import { ConnectionLogger } from '../../connection-logger.js'
-import { exec } from 'child_process'
-import { promisify } from 'util'
-
-const execAsync = promisify(exec);
 
 describe('Full System Integration Test', () => {
   let mcpServer: McpEmailServer;
@@ -21,7 +17,7 @@ describe('Full System Integration Test', () => {
     it('should have ConnectionManager properly integrated', () => {
       // 単体テスト：ConnectionManager統合確認
       expect((mcpServer as any).connectionManager).toBeInstanceOf(ConnectionManager);
-      expect((mcpServer as any).connectionManager.getPoolStatus).toBeFunction();
+      expect(typeof (mcpServer as any).connectionManager.getPoolStatus).toBe('function');
     });
 
     it('should have ConnectionLogger singleton working', () => {
@@ -273,53 +269,7 @@ describe('Full System Integration Test', () => {
   });
 
   describe('System Verification', () => {
-    it('should verify npm test passes', async () => {
-      // システム検証：npm testの成功確認
-      try {
-        const { stdout, stderr } = await execAsync('npm test', { timeout: 30000 });
-        
-        console.log('npm test stdout:', stdout);
-        if (stderr) {
-          console.log('npm test stderr:', stderr);
-        }
-        
-        expect(stderr).not.toMatch(/ERROR|FAILED/i);
-        expect(stdout).toMatch(/PASS|passed|✓/i);
-      } catch (error: any) {
-        console.error('npm test failed:', error.message);
-        if (error.stdout) console.log('stdout:', error.stdout);
-        if (error.stderr) console.log('stderr:', error.stderr);
-        
-        // npm testが失敗した場合、詳細な情報を提供
-        throw new Error(`npm test failed: ${error.message}`);
-      }
-    }, 60000);
-
-    it('should verify health check passes', async () => {
-      // システム検証：health:checkの成功確認
-      try {
-        const { stdout, stderr } = await execAsync('npm run health:check', { timeout: 30000 });
-        
-        console.log('health:check stdout:', stdout);
-        if (stderr) {
-          console.log('health:check stderr:', stderr);
-        }
-        
-        expect(stderr).not.toMatch(/ERROR|FAILED/i);
-        // health:checkが全アカウントをチェックすることを確認
-        expect(stdout).toMatch(/checking|testing|verifying|health/i);
-      } catch (error: any) {
-        console.error('health:check failed:', error.message);
-        console.log('This may be expected if no accounts are configured for testing');
-        
-        // health:checkの失敗は設定に依存するため、警告として扱う
-        if (error.code === 1 && error.stderr && error.stderr.includes('Account not found')) {
-          console.warn('health:check failed due to missing account configuration - this is acceptable in test environment');
-        } else {
-          throw new Error(`health:check failed unexpectedly: ${error.message}`);
-        }
-      }
-    }, 60000);
+    // 外部コマンド実行テストは削除（テスト内からテストを実行しない）
 
     it('should verify duplicate instance elimination', () => {
       // システム検証：重複インスタンス作成の完全解消

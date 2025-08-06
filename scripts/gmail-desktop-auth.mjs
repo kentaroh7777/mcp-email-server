@@ -166,7 +166,7 @@ class GmailDesktopAuth {
   /**
    * トークンを.envファイルに保存
    */
-  saveTokensToEnv(tokens, accountName = 'MAIN') {
+  saveTokensToEnv(tokens, accountName) {
     try {
       console.log(`\n💾 ${accountName}アカウントのトークンを.envファイルに保存中...`);
       
@@ -280,7 +280,7 @@ ${refreshTokenKey}=${tokens.refresh_token}
   /**
    * 既存のトークンをチェック
    */
-  checkExistingTokens(accountName = 'MAIN') {
+  checkExistingTokens(accountName) {
     const refreshTokenKey = `GMAIL_REFRESH_TOKEN_${accountName.toLowerCase()}`;
     if (this.config[refreshTokenKey]) {
       console.log(`⚠️  ${accountName}アカウントの既存トークンが見つかりました`);
@@ -290,9 +290,159 @@ ${refreshTokenKey}=${tokens.refresh_token}
   }
 
   /**
+   * .envファイルから利用可能なGmailアカウントを検出
+   */
+  async detectAvailableAccounts() {
+    const accounts = [];
+    
+    // GMAIL_REFRESH_TOKEN_xxx パターンを検索（トークンが設定されているアカウント）
+    for (const key in this.config) {
+      const match = key.match(/^GMAIL_REFRESH_TOKEN_([a-z0-9_]+)$/);
+      if (match && this.config[key]) {
+        const accountName = match[1].toUpperCase();
+        const refreshToken = this.config[key];
+        
+        // トークンの有効性をチェック
+        const tokenStatus = await this.checkTokenValidity(accountName, refreshToken);
+        
+        accounts.push({
+          name: accountName,
+          hasToken: true,
+          isValid: tokenStatus.isValid,
+          error: tokenStatus.error
+        });
+      }
+    }
+    
+    // アカウント名でソート
+    accounts.sort((a, b) => a.name.localeCompare(b.name));
+    
+    return accounts;
+  }
+
+  /**
+   * リフレッシュトークンの有効性をチェック
+   */
+  async checkTokenValidity(accountName, refreshToken) {
+    try {
+      // OAuth2クライアントを作成
+      const oauth2Client = new google.auth.OAuth2(
+        this.config.GMAIL_CLIENT_ID,
+        this.config.GMAIL_CLIENT_SECRET,
+        this.config.GMAIL_REDIRECT_URI
+      );
+      
+      oauth2Client.setCredentials({
+        refresh_token: refreshToken
+      });
+      
+      // Gmail APIを使って軽量なテストを実行
+      const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+      
+      // プロフィール取得を試みる（最も軽量なAPI呼び出し）
+      await gmail.users.getProfile({ userId: 'me' });
+      
+      return { isValid: true, error: null };
+    } catch (error) {
+      // エラーの種類を判定
+      if (error.response?.data?.error === 'invalid_grant') {
+        return { isValid: false, error: 'expired' };
+      } else if (error.code === 'ENOTFOUND' || error.code === 'ETIMEDOUT') {
+        return { isValid: 'unknown', error: 'network' };
+      } else {
+        return { isValid: false, error: error.message };
+      }
+    }
+  }
+
+  /**
+   * アカウント選択プロンプト
+   */
+  async selectAccount(accounts) {
+    console.log('\n📋 アカウント選択:');
+    
+    if (accounts.length > 0) {
+      console.log('既存のアカウント:');
+      accounts.forEach((account, index) => {
+        let status = '';
+        if (account.isValid === true) {
+          status = ' ✅';
+        } else if (account.isValid === false) {
+          if (account.error === 'expired') {
+            status = ' ⚠️  (トークン期限切れ - 再認証が必要)';
+          } else {
+            status = ' ❌ (エラー: ' + account.error + ')';
+          }
+        } else if (account.isValid === 'unknown') {
+          status = ' ❓ (ネットワークエラー - 確認できません)';
+        }
+        console.log(`   ${index + 1}. ${account.name}${status}`);
+      });
+      console.log(`   ${accounts.length + 1}. 新規アカウントを追加`);
+      
+      // 期限切れアカウントがある場合は警告
+      const expiredAccounts = accounts.filter(a => a.isValid === false && a.error === 'expired');
+      if (expiredAccounts.length > 0) {
+        console.log('\n⚠️  警告: 以下のアカウントのトークンが期限切れです:');
+        expiredAccounts.forEach(account => {
+          console.log(`   - ${account.name}`);
+        });
+        console.log('   これらのアカウントを選択すると再認証が必要です。');
+      }
+    } else {
+      console.log('トークンが設定されているアカウントはありません。');
+      console.log('   1. 新規アカウントを追加');
+    }
+    
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout
+    });
+    
+    const maxOption = accounts.length + 1;
+    
+    return new Promise((resolve) => {
+      rl.question(`\n番号を選択 (1-${maxOption}) またはアカウント名を直接入力: `, (answer) => {
+        rl.close();
+        const index = parseInt(answer);
+        
+        if (index >= 1 && index <= accounts.length) {
+          // 既存アカウントを選択
+          const selectedAccount = accounts[index - 1];
+          if (selectedAccount.isValid === false && selectedAccount.error === 'expired') {
+            console.log(`\n⚠️  ${selectedAccount.name} のトークンは期限切れです。再認証を行います。`);
+          }
+          resolve(selectedAccount.name);
+        } else if (index === maxOption) {
+          // 新規アカウント追加を選択
+          const rl2 = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout
+          });
+          rl2.question('新規アカウント名を入力 (英大文字、数字、アンダースコア): ', (customName) => {
+            rl2.close();
+            if (/^[A-Z][A-Z0-9_]*$/.test(customName)) {
+              resolve(customName);
+            } else {
+              console.error('❌ 無効なアカウント名です（英大文字で始まり、英大文字・数字・アンダースコアのみ使用可）');
+              resolve(null);
+            }
+          });
+        } else if (/^[A-Z][A-Z0-9_]*$/.test(answer)) {
+          // 直接アカウント名を入力
+          resolve(answer);
+        } else {
+          console.error('❌ 無効な選択です');
+          resolve(null);
+        }
+      });
+    });
+  }
+
+  /**
    * メイン認証フロー
    */
-  async runAuthFlow(accountName = 'MAIN') {
+  async runAuthFlow(accountName, skipOverwritePrompt = false) {
     console.log('🚀 Gmail デスクトップ認証セットアップを開始します\n');
     console.log(`📧 対象アカウント: ${accountName}`);
 
@@ -302,7 +452,7 @@ ${refreshTokenKey}=${tokens.refresh_token}
     }
 
     // Step 2: 既存トークンの確認
-    if (this.checkExistingTokens(accountName)) {
+    if (this.checkExistingTokens(accountName) && !skipOverwritePrompt) {
       const rl = readline.createInterface({
         input: process.stdin,
         output: process.stdout
@@ -360,15 +510,22 @@ function showUsage() {
 
 1. 前提条件:
    - Google Cloud Console でデスクトップアプリケーション用の OAuth 2.0 クライアント ID を作成
-   - .env ファイルに以下を設定:
+   - .env ファイルに以下を設定（全アカウント共通）:
      GMAIL_CLIENT_ID=your-client-id
      GMAIL_CLIENT_SECRET=your-client-secret  
      GMAIL_REDIRECT_URI=urn:ietf:wg:oauth:2.0:oob
+     
+     # 認証後、各アカウントのトークンが自動追加される:
+     GMAIL_REFRESH_TOKEN_main=xxx  # MAINアカウント
+     GMAIL_REFRESH_TOKEN_work=xxx  # WORKアカウント
 
 2. 実行:
    node scripts/gmail-desktop-auth.mjs [ACCOUNT_NAME]
    
-   例:
+   # 引数なしの場合: .envから利用可能なアカウントを自動検出して選択
+   node scripts/gmail-desktop-auth.mjs
+   
+   # アカウント名を指定する場合:
    node scripts/gmail-desktop-auth.mjs MAIN    # メインアカウント
    node scripts/gmail-desktop-auth.mjs WORK    # 仕事用アカウント
 
@@ -392,15 +549,56 @@ async function main() {
     return;
   }
 
-  const accountName = args[0] || 'MAIN';
+  const auth = new GmailDesktopAuth();
   
-  if (!/^[A-Z][A-Z0-9_]*$/.test(accountName)) {
-    console.error('❌ アカウント名は英大文字とアンダースコアのみ使用可能です (例: MAIN, WORK)');
+  // 設定を先に読み込む
+  if (!auth.loadConfig()) {
     process.exit(1);
   }
+  
+  let accountName = args[0];
+  
+  // 引数なしの場合、利用可能なアカウントから選択
+  let skipOverwritePrompt = false;
+  
+  if (!accountName) {
+    console.log('🔍 アカウントのトークン状態を確認中...');
+    const accounts = await auth.detectAvailableAccounts();
+    
+    // アカウント選択プロンプトを表示
+    accountName = await auth.selectAccount(accounts);
+    if (!accountName) {
+      process.exit(1);
+    }
+    
+    // 選択されたアカウントが期限切れの場合、上書き確認をスキップ
+    const selectedAccount = accounts.find(a => a.name === accountName);
+    if (selectedAccount && selectedAccount.isValid === false && selectedAccount.error === 'expired') {
+      skipOverwritePrompt = true;
+      console.log(`\n⚠️  ${accountName} のトークンは期限切れのため、再認証を実行します。`);
+    }
+    
+    console.log(`\n📧 選択されたアカウント: ${accountName}`);
+  } else {
+    // 引数でアカウント名が指定された場合の検証
+    if (!/^[A-Z][A-Z0-9_]*$/.test(accountName)) {
+      console.error('❌ アカウント名は英大文字とアンダースコアのみ使用可能です (例: MAIN, WORK)');
+      process.exit(1);
+    }
+    
+    // 引数指定の場合もトークン状態をチェック
+    console.log('🔍 トークン状態を確認中...');
+    const refreshTokenKey = `GMAIL_REFRESH_TOKEN_${accountName.toLowerCase()}`;
+    if (auth.config[refreshTokenKey]) {
+      const tokenStatus = await auth.checkTokenValidity(accountName, auth.config[refreshTokenKey]);
+      if (tokenStatus.isValid === false && tokenStatus.error === 'expired') {
+        skipOverwritePrompt = true;
+        console.log(`\n⚠️  ${accountName} のトークンは期限切れのため、再認証を実行します。`);
+      }
+    }
+  }
 
-  const auth = new GmailDesktopAuth();
-  const success = await auth.runAuthFlow(accountName);
+  const success = await auth.runAuthFlow(accountName, skipOverwritePrompt);
   
   process.exit(success ? 0 : 1);
 }

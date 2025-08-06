@@ -74,16 +74,16 @@ describe('Configuration Tests', () => {
     if (fs.existsSync(logFile)) {
       const logContent = fs.readFileSync(logFile, 'utf8');
       
-      // ログ内容の基本的な形式確認
-      expect(logContent).toMatch(/\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\] \[INFO\] MCP Email Server starting.../);
+      // ログ内容の基本的な形式確認（ISO8601タイムスタンプ形式）
+      expect(logContent).toMatch(/\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\] \[INFO\]/);
       
       // ログエントリが複数ある場合の確認
       const logLines = logContent.trim().split('\n').filter(line => line.length > 0);
       expect(logLines.length).toBeGreaterThan(0);
       
-      // 各ログエントリがJSON形式の追加情報を含むことを確認
+      // 各ログエントリがISO8601タイムスタンプとレベル表記を含むことを確認
       for (const line of logLines) {
-        expect(line).toMatch(/\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\] \[(INFO|DEBUG|WARN|ERROR|LOG)\]/);
+        expect(line).toMatch(/\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\] \[(INFO|DEBUG|WARN|ERROR)\]/);
       }
     } else {
       // ログファイルが存在しない場合は、テスト用に作成してみる

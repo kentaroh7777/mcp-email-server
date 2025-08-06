@@ -60,6 +60,12 @@ describe('Simple IMAP Handler Test', () => {
   it('should use ConnectionManager for IMAP operations', async () => {
     // ConnectionManager統合テスト
     const mockConnectionManager = {
+      testConnection: vi.fn().mockResolvedValue({
+        success: true,
+        accountName: 'test_imap_account',
+        accountType: 'imap',
+        message: 'Connection successful'
+      }),
       getImapHandler: vi.fn().mockResolvedValue({
         testConnection: vi.fn().mockResolvedValue(undefined),
         listEmails: vi.fn().mockResolvedValue([])
@@ -87,7 +93,7 @@ describe('Simple IMAP Handler Test', () => {
 
     const response = await mcpServer.handleRequest(testRequest);
     expect(response.result.status).toBe('connected');
-    expect(mockConnectionManager.getImapHandler).toHaveBeenCalledWith('test_imap_account');
+    expect(mockConnectionManager.testConnection).toHaveBeenCalledWith('test_imap_account');
   });
 
   it.skipIf(!getTestAccountName('imap'))('should get unread count for IMAP account', async () => {
@@ -110,9 +116,11 @@ describe('Simple IMAP Handler Test', () => {
 
   it('should verify no duplicate instances exist', () => {
     // 重複インスタンス作成の完全解消確認
-    expect((mcpServer as any).gmailHandler).toBeUndefined();
-    expect((mcpServer as any).imapHandler).toBeUndefined();
-    expect((mcpServer as any).connectionManager).toBeInstanceOf(ConnectionManager);
+    // 新しいサーバーインスタンスを作成してテスト
+    const testServer = new McpEmailServer();
+    expect((testServer as any).gmailHandler).toBeUndefined();
+    expect((testServer as any).imapHandler).toBeUndefined();
+    expect((testServer as any).connectionManager).toBeInstanceOf(ConnectionManager);
   });
 
   it.skipIf(!getTestAccountName('imap'))('should list emails from IMAP account', async () => {

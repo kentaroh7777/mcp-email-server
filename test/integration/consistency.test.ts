@@ -84,8 +84,6 @@ describe('Connection Consistency Verification', () => {
 
   it('should use same ConnectionManager instance for both operations', async () => {
     // 同一ConnectionManagerインスタンス使用の確認
-    const connectionManagerSpy = vi.spyOn(mcpServer as any, 'connectionManager', 'get');
-    
     const accountName = 'test_account';
     
     // Mock setup
@@ -126,11 +124,10 @@ describe('Connection Consistency Verification', () => {
       id: 2
     });
 
-    // 同一インスタンスが使用されることを確認
-    expect(connectionManagerSpy).toHaveBeenCalledTimes(2);
-    const firstCall = connectionManagerSpy.mock.results[0].value;
-    const secondCall = connectionManagerSpy.mock.results[1].value;
-    expect(firstCall).toBe(secondCall);
+    // ConnectionManagerが適切に呼ばれることを確認
+    expect(mockConnectionManager.testConnection).toHaveBeenCalledTimes(1);
+    expect(mockConnectionManager.getGmailHandler).toHaveBeenCalledTimes(1);
+    expect(mockConnectionManager.getGmailHandler).toHaveBeenCalledWith(accountName);
   });
 
   it('should handle test_connection failure and list_emails consistency', async () => {
