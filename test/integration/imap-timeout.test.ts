@@ -43,73 +43,31 @@ describe('IMAP Tools Timeout Prevention', () => {
     timedOut: boolean;
   }> {
     return new Promise((resolve) => {
-      const child = spawn('npx', ['tsx', serverPath], {
-        stdio: ['pipe', 'pipe', 'pipe'],
-        env: { ...process.env, NODE_ENV: 'test' }
-      });
-
-      let stdout = '';
-      let stderr = '';
-      let timedOut = false;
-
-      const timeout = setTimeout(() => {
-        timedOut = true;
-        child.kill('SIGTERM');
+      const timeoutId = setTimeout(() => {
         resolve({
           success: false,
-          error: 'Command timed out',
-          timedOut: true
+          timedOut: true,
+          error: 'Command timed out'
         });
       }, timeoutMs);
 
-      child.stdout.on('data', (data) => {
-        stdout += data.toString();
-      });
-
-      child.stderr.on('data', (data) => {
-        stderr += data.toString();
-      });
-
-      child.on('close', (code) => {
-        clearTimeout(timeout);
-        
-        if (timedOut) return; // Already resolved
-
-        try {
-          const jsonOutput = stdout.split('\n').filter(line => line.startsWith('{') && line.endsWith('}')).pop();          if (jsonOutput) {            const response = JSON.parse(jsonOutput);
-            resolve({
-              success: true,
-              response,
-              timedOut: false
-            });
-          } else {
-            resolve({
-              success: false,
-              error: `No output. Code: ${code}, Stderr: ${stderr}`,
-              timedOut: false
-            });
-          }
-        } catch (error) {
-          resolve({
-            success: false,
-            error: `JSON parse error: ${error}. Stdout: ${stdout}, Stderr: ${stderr}`,
-            timedOut: false
-          });
-        }
-      });
-
-      child.on('error', (error) => {
-        clearTimeout(timeout);
+      mcpServer.handleRequest(command).then(response => {
+        clearTimeout(timeoutId);
+        resolve({
+          success: !response.error,
+          response: response,
+          timedOut: false,
+          error: response.error?.message
+        });
+      }).catch(error => {
+        clearTimeout(timeoutId);
         resolve({
           success: false,
-          error: `Process error: ${error.message}`,
+          error: error.message,
           timedOut: false
         });
       });
 
-      // Send the command
-      child.stdin.write(JSON.stringify(command) + '\n');
-      child.stdin.end();
     });
   }
 
@@ -211,7 +169,7 @@ describe('IMAP Tools Timeout Prevention', () => {
     }
 
     expect(result.timedOut).toBe(false);
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
     expect(result.response).toBeDefined();
     expect(result.response.error).toBeDefined();
   }, 10000);
@@ -278,12 +236,18 @@ describe('IMAP Tools Timeout Prevention', () => {
     }
 
     expect(result.timedOut).toBe(false);
-    expect(result.success).toBe(true);
     expect(result.response).toBeDefined();
+    
     if (result.response.error) {
+      // Account not found is acceptable for this test
       expect(result.response.error.message).toContain('Account not found');
+      expect(result.success).toBe(false);
+      console.log('Account MAIN not found - this is expected in this test setup');
     } else {
-      const searchResult = JSON.parse(result.response.result.content[0].text);
+      // If no error, the search was successful
+      expect(result.success).toBe(true);
+      // Direct access to result data
+      const searchResult = result.response.result;
       expect(searchResult.emails).toBeDefined();
       expect(Array.isArray(searchResult.emails)).toBe(true);
       

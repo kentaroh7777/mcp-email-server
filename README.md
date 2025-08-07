@@ -4,7 +4,7 @@ Gmail と IMAP アカウントの両方をサポートする、統合メール�
 
 ## 🚀 機能
 
-- **MCP プロトコル対応**: 標準入出力MCPサーバー（HTTPエンドポイント不要）
+- **MCP プロトコル対応**: ストリーミングHTTP MCPサーバー
 - **Gmail 統合**: OAuth2ベースのGmail API アクセスと自動トークン管理
 - **IMAP サポート**: 各種メールプロバイダーへの安全なIMAP接続
 - **統一インターフェース**: 自動検出機能付きのすべてのメールアカウント用単一MCPインターフェース
@@ -21,6 +21,7 @@ Gmail と IMAP アカウントの両方をサポートする、統合メール�
 |--------|------|----------|
 | `list_emails` | 任意のアカウントからメール一覧を取得（種別自動判定） | `account_name`, `limit?`, `folder?`, `unread_only?` |
 | `search_emails` | 任意のアカウントでメール検索（種別自動判定） | `account_name`, `query`, `limit?` |
+| `search_all_emails` | 全てのGmailとIMAPアカウントを横断検索 | `query`, `accounts?`, `limit?`, `sortBy?` |
 | `get_email_detail` | 任意のアカウントから詳細メール情報を取得 | `account_name`, `email_id` |
 | `archive_email` | 任意のアカウントでメールをアーカイブ（種別自動判定） | `account_name`, `email_id`, `remove_unread?` |
 | `send_email` | 任意のアカウントからメール送信（種別自動判定） | `account_name`, `to`, `subject`, `text/html`, `cc?`, `bcc?`, `attachments?` |
@@ -32,7 +33,6 @@ Gmail と IMAP アカウントの両方をサポートする、統合メール�
 | `list_accounts` | 設定済みメールアカウントをステータス付きで一覧表示 | なし |
 | `test_connection` | 特定のアカウントへの接続テスト | `account_name` |
 | `get_account_stats` | 全アカウントの包括的統計情報を取得 | なし |
-| `search_all_emails` | 全てのGmailとIMAPアカウントを横断検索 | `query`, `accounts?`, `limit?`, `sortBy?` |
 
 ## 🛠️ 利用可能なスクリプト
 
@@ -47,14 +47,6 @@ Gmail と IMAP アカウントの両方をサポートする、統合メール�
 | `setup-xserver.mjs` | XServer用対話式IMAPアカウントセットアップ | `node scripts/setup-xserver.mjs` |
 | `encrypt-password.ts` | IMAPアカウント用パスワード暗号化 | `npx tsx scripts/encrypt-password.ts [PASSWORD]` |
 
-### 🖥️ サーバーとテスト
-
-| スクリプト | 目的 | 使用方法 |
-|-----------|------|----------|
-| `run-email-server.ts` | 本番用MCPサーバー起動 | `npx tsx scripts/run-email-server.ts` |
-| `quick-test.ts` | 高速接続・応答テスト | `npx tsx scripts/quick-test.ts` |
-| `monitor-health.ts` | 包括的ヘルスモニタリング | `npx tsx scripts/monitor-health.ts` |
-| `decrypt-test.ts` | パスワード復号化機能テスト | `npx tsx scripts/decrypt-test.ts` |
 
 ## ⚙️ インストールとセットアップ
 
@@ -98,6 +90,7 @@ IMAP_PORT_accountname=993
 IMAP_TLS_accountname=true
 ```
 
+
 ### 4. アカウントセットアップ
 
 #### Gmailアカウント
@@ -138,29 +131,82 @@ Cursor MCP設定ファイル (`~/.cursor/mcp.json`) に追加：
 {
   "mcpServers": {
     "mcp-email-server": {
-      "command": "npx",
-      "args": ["tsx", "src/index.ts"],
-      "cwd": "/path/to/mcp-email-server",
-      "env": {
-        "EMAIL_ENCRYPTION_KEY": "your-unique-encryption-key"
-      }
+      "url": "http://localhost:3456/mcp",
+      "transport": "http"
     }
   }
 }
 ```
+【注意】認証なしで接続されるので、サーバーは絶対公開しないでください。
 
-### 環境変数
 
-| 変数 | 説明 | デフォルト |
-|-------|------|----------|
-| `EMAIL_ENCRYPTION_KEY` | **必須** - IMAPパスワード暗号化用キー | なし |
-| `GMAIL_TIMEOUT_MS` | Gmail API操作タイムアウト | 60000 (60秒) |
-| `IMAP_CONNECTION_TIMEOUT_MS` | IMAP接続タイムアウト | 30000 (30秒) |
-| `IMAP_OPERATION_TIMEOUT_MS` | IMAP操作タイムアウト | 60000 (60秒) |
-| `SEARCH_ALL_TIMEOUT_MS` | クロスアカウント検索タイムアウト | 25000 (25秒) |
-| `EMAIL_DEFAULT_TIMEZONE` | 日付操作用デフォルトタイムゾーン | Asia/Tokyo |
+### 🖥️ サーバーとテスト
 
-## 💡 使用例
+`bin/` ディレクトリに配置：
+
+| スクリプト | 目的 | 使用方法 |
+|-----------|------|----------|
+| `run-streaming-email-server.ts` | 本番用MCPサーバー起動 | `npx tsx bin/run-streaming-email-server.ts` |
+※ run-stdio-email-server.ts はメンテ終了
+
+#### MacOSの常時起動方法
+
+ストリーミングHTTPサーバーMCPですので、サーバーは利用時常時起動で運用してください。
+macOSの場合、以下のようなLaunchAgentのplistファイルを作成しておくと便利です。
+/PATH/TOは適切なパスに置換してください。
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>localhost.mcp-email-server</string>
+    <key>Program</key>
+    <string>/PATH/TO/tsx</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/PATH/TO/.nvm/versions/node/v23.7.0/bin/tsx</string>
+        <string>/PATH/TO/mcp-email-server/bin/run-streaming-email-server.ts</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>/PATH/TO/src/git/mcp-email-server</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/PATH/TO/Library/Logs/mcp-email-server.log</string>
+    <key>StandardErrorPath</key>
+    <string>/PATH/TO/Library/Logs/mcp-email-server-error.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/PATH/TO/NODE/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>NODE_PATH</key>
+        <string>/PATH/TO/NODE/lib/node_modules</string>
+    </dict>
+</dict>
+</plist>
+```
+
+- LaunchAgentでサーバー起動
+```bash
+launchctl load ~/Library/LaunchAgents/localhost.mcp-email-server.plist
+```
+
+その他のテスト用スクリプトは
+`scripts/` ディレクトリに配置：
+
+| スクリプト | 目的 | 使用方法 |
+|-----------|------|----------|
+| `quick-test.ts` | 高速接続・応答テスト | `npx tsx scripts/quick-test.ts` |
+| `monitor-health.ts` | 包括的ヘルスモニタリング | `npx tsx scripts/monitor-health.ts` |
+| `decrypt-test.ts` | パスワード復号化機能テスト | `npx tsx scripts/decrypt-test.ts` |
+
+
+
+## 💡 MCPツール使用例
 
 ### アカウント管理
 

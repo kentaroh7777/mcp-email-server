@@ -1,0 +1,240 @@
+# streaming-server 設計文書
+
+## 1. プロジェクト概要
+
+### 1.1 目的・背景
+既存のstdin/stdout方式MCPサーバーがCursorで認識されない問題を解決するため、HTTP Streamable Transport方式のMCPサーバーを実装する。
+
+### 1.2 成功基準
+- CursorでMCPツールが認識・実行される
+- 既存のemail機能（list_emails, send_email等）が全て利用可能
+- 設定が簡単（個人利用想定）
+
+### 1.3 制約条件
+- **技術制約**: MCP 2025-03-26 Streamable HTTP Transport仕様準拠
+- **ビジネス制約**: 個人利用のため認証・パフォーマンス考慮不要
+- **期間制約**: 最小限実装で迅速リリース
+
+## 2. 要件定義
+
+### 2.1 機能要件
+
+#### 2.1.1 主要機能
+- **HTTP MCPサーバー**: Streamable HTTP Transport対応
+  - 入力: HTTP POST (JSON-RPC)
+  - 処理: 既存McpEmailServerの処理を流用
+  - 出力: HTTP 202/SSEストリーミング
+
+#### 2.1.2 補助機能
+- **設定支援**: Cursor用設定ファイル例の提供
+- **ヘルスチェック**: サーバー稼働確認機能
+
+### 2.2 非機能要件
+- **性能要件**: 考慮不要（個人利用）
+- **可用性要件**: 考慮不要（ローカル実行）
+- **保守性要件**: 既存コードの最大限活用
+
+## 3. アーキテクチャ設計
+
+### 3.1 システム構成
+
+```mermaid
+graph TB
+    A[Cursor IDE] -->|HTTP POST| B[Express Server]
+    B --> C[MCP HTTP Handler]
+    C --> D[McpEmailServer]
+    D --> E[Gmail/IMAP Services]
+    
+    subgraph "bin/run-streaming-email-server.ts"
+        B1[Express App]
+        B2[MCP Endpoint]
+        B3[CORS Security]
+    end
+    
+    subgraph "既存システム（再利用）"
+        D1[McpEmailServer.handleRequest]
+        D2[AccountManager]
+        D3[ConnectionManager]
+    end
+```
+
+### 3.2 技術スタック
+- **HTTPサーバー**: Express.js
+- **MCPプロトコル**: Streamable HTTP Transport (2025-03-26)
+- **既存システム**: McpEmailServerクラスをそのまま活用
+
+### 3.3 データフロー
+
+1. **Cursorリクエスト** → HTTP POST `/mcp`
+2. **JSON-RPC解析** → Express middleware
+3. **既存処理委譲** → `McpEmailServer.handleRequest()`
+4. **レスポンス生成** → HTTP 202 or SSE stream
+
+## 4. 詳細設計
+
+### 4.1 コンポーネント設計
+
+#### 4.1.1 StreamingMcpServer
+- **責務**: HTTP requests → 既存McpEmailServerへの委譲
+- **インターフェース**: Express.js middleware
+- **実装方針**: 最小限のHTTPラッパー実装
+
+#### 4.1.2 Express App Configuration
+- **責務**: HTTPサーバーの起動・設定
+- **インターフェース**: 
+  - `POST /mcp`: JSON-RPC処理
+  - `GET /health`: ヘルスチェック
+- **実装方針**: セキュリティヘッダー、CORS設定
+
+### 4.2 データ構造設計
+
+```typescript
+// HTTP Request/Response structures
+interface MCPHttpRequest {
+  method: 'POST' | 'GET';
+  url: '/mcp';
+  headers: {
+    'Content-Type': 'application/json';
+    'Accept': 'application/json, text/event-stream';
+  };
+  body: MCPRequest; // 既存のMCPRequest型
+}
+
+interface MCPHttpResponse {
+  status: 202 | 200;
+  headers: {
+    'Content-Type': 'application/json' | 'text/event-stream';
+  };
+  body: MCPResponse; // 既存のMCPResponse型
+}
+```
+
+### 4.3 API設計
+
+```typescript
+// Primary endpoint
+app.post('/mcp', async (req: Request, res: Response) => {
+  // 1. Validate MCP request
+  // 2. Delegate to McpEmailServer.handleRequest()
+  // 3. Return HTTP 202 or stream response
+});
+
+app.get('/mcp', async (req: Request, res: Response) => {
+  // Handle SSE connections if needed
+});
+
+app.get('/health', (req: Request, res: Response) => {
+  res.json({ status: 'healthy', timestamp: new Date().toISOString() });
+});
+```
+
+## 5. 実装計画
+
+### 5.1 Phase分割
+- **Phase 1**: 基本HTTPサーバー + MCP delegation実装
+- **Phase 2**: Cursor連携テスト + 設定ドキュメント作成
+
+### 5.2 依存関係
+```mermaid
+graph TD
+    Phase1[Phase1: HTTP Server実装] --> Phase2[Phase2: Cursor連携テスト]
+```
+
+### 5.3 工数見積もり
+| Phase | Group | タスク数 | 工数(時間) | 並列度 |
+|-------|-------|----------|------------|---------|
+| 1     | A     | 3        | 4          | 1       |
+| 2     | B     | 2        | 2          | 1       |
+
+## 6. 固定値・環境変数設計
+
+### 6.1 固定値
+- **HTTPポート**: 3456 (デフォルト)
+- **MCPエンドポイント**: `/mcp`
+- **プロトコルバージョン**: `2025-03-26`
+
+### 6.2 環境変数（.env.example）
+```bash
+# HTTP Server Configuration
+MCP_HTTP_PORT=3456
+MCP_HTTP_HOST=localhost
+
+# Email Server Configuration (既存)
+# Gmail account settings...
+# IMAP account settings...
+```
+
+## 7. テスト戦略
+
+### 7.1 テスト方針
+- **単体テスト**: HTTP endpoint動作確認
+- **統合テスト**: McpEmailServerとの連携確認
+- **E2Eテスト**: Cursor経由での実際の使用テスト
+
+### 7.2 テストケース設計指針
+```typescript
+// HTTP endpoint test
+describe('StreamingMcpServer', () => {
+  it('should_handle_initialize_request_via_http', async () => {
+    const response = await request(app)
+      .post('/mcp')
+      .send({ jsonrpc: '2.0', id: 1, method: 'initialize' });
+    expect(response.status).toBe(202);
+  });
+});
+
+// E2E test with Cursor
+describe('Cursor Integration', () => {
+  it('should_list_emails_via_cursor_mcp', async () => {
+    // Manual test: Cursorでlist_emailsツールを実行
+  });
+});
+```
+
+## 8. 運用・保守計画
+
+### 8.1 監視・ログ
+- **アクセスログ**: Express標準ログ
+- **エラーログ**: 既存file-logger.ts活用
+
+### 8.2 保守性考慮
+- 既存McpEmailServerの変更は最小限に抑制
+- HTTP layer は薄いwrapper として実装
+
+## 9. Cursor連携設定
+
+### 9.1 設定ファイル例
+```json
+// .cursor/mcp.json
+{
+  "mcpServers": {
+    "email-server": {
+      "url": "http://localhost:3456/mcp",
+      "transport": "http"
+    }
+  }
+}
+```
+
+### 9.2 使用手順
+1. `npm run streaming` でHTTPサーバー起動
+2. Cursorで`.cursor/mcp.json`設定
+3. Cursorでemail関連ツール使用可能
+
+## 10. 実装タスク分割
+
+### Phase 1: HTTP Server実装
+#### Group A: Core Implementation
+1. **Task A1**: Express app setup + basic routing
+2. **Task A2**: MCP request/response handling
+3. **Task A3**: McpEmailServer integration
+
+### Phase 2: Integration & Documentation  
+#### Group B: Testing & Documentation
+1. **Task B1**: Cursor integration testing
+2. **Task B2**: Usage documentation + examples
+
+---
+
+**設計完了日**: 2025-08-06
+**プロトコルバージョン**: MCP 2025-03-26 Streamable HTTP Transport

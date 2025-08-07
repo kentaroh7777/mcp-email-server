@@ -32,6 +32,14 @@ export default class McpEmailServer {
         case 'initialize':
           result = this.getInitializeResult();
           break;
+        case 'initialized':
+          // MCP 2025-06-18: クライアントからの初期化完了通知（通知なので応答不要）
+          console.log(`\n✅ [${new Date().toISOString()}] Client sent initialized notification - ready for normal operations`);
+          return {
+            jsonrpc: '2.0',
+            id: request.id,
+            result: null
+          };
         case 'tools/list':
           result = this.getTools();
           break;
@@ -59,10 +67,15 @@ export default class McpEmailServer {
 
   private getInitializeResult() {
     return {
-      protocolVersion: '2024-11-05',
+      protocolVersion: '2025-06-18',
       capabilities: {
-        tools: { listChanged: true },
-        resources: { subscribe: true, listChanged: true }
+        tools: true,
+        prompts: true,
+        resources: false,
+        logging: false,
+        roots: {
+          listChanged: false
+        }
       },
       serverInfo: {
         name: 'mcp-email-server',

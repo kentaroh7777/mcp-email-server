@@ -137,7 +137,7 @@ export function outputMCPResponse(response: any): void {
 /**
  * 手動でファイルログに記録する関数
  */
-export function logToFile(level: 'debug' | 'info' | 'warn' | 'error', message: string, ...args: any[]): void {
+export function logToFile(_level: 'debug' | 'info' | 'warn' | 'error', _message: string, ..._args: any[]): void {
   // ログ出力を完全に無効化（MCP接続問題のデバッグのため）
   // if (process.env.NODE_ENV === 'production') {
   //   if (!fileLogger) {

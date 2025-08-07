@@ -22,7 +22,7 @@ describe('MCPEmailProtocolHandler', () => {
 
       const data = response.result;
       expect(data).toMatchObject({
-        protocolVersion: '2024-11-05',
+        protocolVersion: '2025-06-18',
         serverInfo: {
           name: 'mcp-email-server',
           version: '1.0.0'
