@@ -19,8 +19,7 @@
     "test:imap-timeout": "vitest run test/imap-timeout.test.ts",
     "test:simple-imap": "vitest run test/simple-imap.test.ts",
     "test:fast-server": "npx tsx test/run-email-server-fast.ts",
-    "health:check": "npx tsx scripts/monitor-health.ts",
-    "test:quick": "npx tsx scripts/quick-test.ts"
+    "health:check": "npx tsx scripts/monitor-health.ts"
   },
   "keywords": [
     "mcp",

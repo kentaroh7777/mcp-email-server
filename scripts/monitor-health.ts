@@ -1,12 +1,13 @@
 #!/usr/bin/env npx tsx
 
 /**
- * Email Server Health Monitor
- * 全ツールの応答性をチェックする包括的ヘルスチェック
+ * Email Server Health Monitor (HTTP版)
+ * FastMCPのHTTP Streamingサーバーに対してJSON-RPCをPOSTして疎通確認を行う
  */
 
-import { spawn } from 'child_process';
-import path from 'path';
+// Node.js v18+ のグローバル fetch を使用
+import { setTimeout as delay } from 'node:timers/promises';
+import net from 'node:net';
 
 interface FailureAnalysis {
   reason: string;
@@ -75,7 +76,102 @@ function analyzeFailure(testName: string, errorMessage: string): FailureAnalysis
   };
 }
 
-const serverPath = path.join(process.cwd(), 'scripts/run-email-server.ts');
+function getServerUrl(): string {
+  // 環境変数があれば優先。なければデフォルトのHTTPエンドポイントを使用
+  // ~/.cursor/mcp.json でも http://localhost:3456/mcp が設定されている前提
+  return process.env.MCP_EMAIL_SERVER_URL || 'http://localhost:3456/mcp';
+}
+
+let activeSessionId: string | undefined;
+
+function parseHostPortFromUrl(urlStr: string): { host: string; port: number } {
+  try {
+    const u = new URL(urlStr);
+    const host = u.hostname || 'localhost';
+    const port = u.port ? Number(u.port) : 3456;
+    return { host, port };
+  } catch {
+    return { host: 'localhost', port: 3456 };
+  }
+}
+
+async function checkTcpOpen(host: string, port: number, timeoutMs = 2000): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    const socket = net.connect({ host, port });
+    let done = false;
+    const onDone = (ok: boolean) => {
+      if (done) return;
+      done = true;
+      try { socket.destroy(); } catch {}
+      resolve(ok);
+    };
+    const timer = setTimeout(() => onDone(false), timeoutMs);
+    socket.on('connect', () => {
+      clearTimeout(timer);
+      onDone(true);
+    });
+    socket.on('error', () => {
+      clearTimeout(timer);
+      onDone(false);
+    });
+  });
+}
+
+async function checkPing(host: string, port: number, timeoutMs = 2000): Promise<{ ok: boolean; status?: number; error?: string }>{
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`http://${host}:${port}/ping`, { method: 'GET', signal: controller.signal });
+    return { ok: res.ok, status: res.status };
+  } catch (e: any) {
+    return { ok: false, error: String(e) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function initializeSession(timeoutMs: number = 10000): Promise<{ success: boolean; error?: string }>{
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const url = getServerUrl();
+    const initializeRequest = {
+      jsonrpc: '2.0',
+      id: 0,
+      method: 'initialize',
+      params: {
+        protocolVersion: '2025-03-26',
+        clientInfo: { name: 'health-check', version: '1.0.0' },
+        capabilities: {
+          tools: true,
+          prompts: true,
+          resources: false,
+          logging: false,
+          roots: { listChanged: false }
+        }
+      }
+    };
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'accept': 'application/json, text/event-stream' },
+      body: JSON.stringify(initializeRequest),
+      signal: controller.signal
+    });
+    // セッションIDはレスポンスヘッダーに付与される
+    const sid = res.headers.get('mcp-session-id') || res.headers.get('Mcp-Session-Id') || undefined;
+    if (!sid) {
+      const body = await res.text();
+      return { success: false, error: body || `No session id. HTTP ${res.status}` };
+    }
+    activeSessionId = sid;
+    return { success: true };
+  } catch (err: any) {
+    const timedOut = err?.name === 'AbortError';
+    return { success: false, error: timedOut ? 'initialize timed out' : String(err) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 async function runHealthCheck(): Promise<{
   success: boolean;
@@ -86,6 +182,25 @@ async function runHealthCheck(): Promise<{
   const results: any[] = [];
   const errors: string[] = [];
   const failures: { testName: string; analysis: FailureAnalysis }[] = [];
+
+  // 0. サーバー状態チェック
+  const serverUrl = getServerUrl();
+  const { host, port } = parseHostPortFromUrl(serverUrl);
+  console.log(`🔍 Server config`);
+  console.log(`  URL: ${serverUrl}`);
+  console.log(`  Host: ${host}`);
+  console.log(`  Port: ${port}`);
+
+  const tcpOpen = await checkTcpOpen(host, port, 1500);
+  console.log(`  TCP listen: ${tcpOpen ? '✅' : '❌'}`);
+  const ping = await checkPing(host, port, 1500);
+  console.log(`  /ping: ${ping.ok ? `✅ (${ping.status})` : '❌'}`);
+
+  // 起動直後の猶予
+  if (!tcpOpen || !ping.ok) {
+    console.log('  ⏳ retry after short delay...');
+    await delay(500);
+  }
 
   // 1. list_accountsツールを呼び出して全てのアカウント名を取得
   console.log(`🔄 list_accounts をテスト中...`);
@@ -117,10 +232,27 @@ async function runHealthCheck(): Promise<{
   let allAccountNames: string[] = [];
   if (listAccountsResult.success && listAccountsResult.response?.result) {
     try {
-      const data = listAccountsResult.response.result;
-      if (data && Array.isArray(data.accounts)) {
-        allAccountNames = data.accounts.map((acc: any) => acc.name);
+      // FastMCPのcontentにテキストJSONで入るパターンへ対応
+      const result = listAccountsResult.response.result;
+      // 1) content経由
+      if (Array.isArray(result.content)) {
+        for (const item of result.content) {
+          if (item && typeof item.text === 'string') {
+            try {
+              const parsed = JSON.parse(item.text);
+              if (parsed && Array.isArray(parsed.accounts)) {
+                allAccountNames.push(...parsed.accounts.map((acc: any) => acc.name));
+              }
+            } catch {/* ignore parse error per item */}
+          }
+        }
       }
+      // 2) 従来の直接accounts
+      if (Array.isArray((result as any).accounts)) {
+        allAccountNames.push(...(result as any).accounts.map((acc: any) => acc.name));
+      }
+      // 重複除去
+      allAccountNames = Array.from(new Set(allAccountNames)).filter(Boolean);
     } catch (e) {
       errors.push(`list_accounts: JSON parse error: ${e}`);
     }
@@ -229,97 +361,102 @@ async function runMCPCommand(command: any, timeoutMs: number = 10000): Promise<{
   error?: string;
   timedOut: boolean;
 }> {
-  return new Promise((resolve) => {
-    const child = spawn('timeout', [`${Math.ceil(timeoutMs/1000)}s`, 'npx', 'tsx', serverPath], {
-      stdio: ['pipe', 'pipe', 'pipe']
-    });
+  // 1) セッション未確立なら初期化
+  if (!activeSessionId) {
+    const init = await initializeSession(timeoutMs);
+    if (!init.success) {
+      return { success: false, error: init.error || 'Failed to initialize session', timedOut: false };
+    }
+  }
 
-    let stdout = '';
-    let stderr = '';
-    let timedOut = false;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const url = getServerUrl();
 
-    // timeoutコマンドを使用しているので、内部タイムアウトは不要
-    // const timeout = setTimeout(() => {
-    //   timedOut = true;
-    //   child.kill('SIGTERM');
-    //   resolve({
-    //     success: false,
-    //     error: 'Command timed out',
-    //     timedOut: true
-    //   });
-    // }, timeoutMs);
-
-    child.stdout.on('data', (data) => {
-      stdout += data.toString();
-    });
-
-    child.stderr.on('data', (data) => {
-      stderr += data.toString();
-    });
-
-    child.on('close', (code) => {
+  const doPost = async (): Promise<{ ok: boolean; responseText: string; status: number; error?: string }>=>(
+    new Promise(async (resolve) => {
       try {
-        if (code === 124) {
-          // timeoutコマンドのタイムアウト終了コード
-          resolve({
-            success: false,
-            error: 'Command timed out',
-            timedOut: true
-          });
-        } else if (stdout.trim()) {
-          // 複数のJSONレスポンスがある場合、最初のものを使用
-          const lines = stdout.trim().split('\n');
-          const firstLine = lines[0];
-          const response = JSON.parse(firstLine);
-          
-          // エラーレスポンスの場合は失敗として扱う
-          const hasError = response.error !== undefined;
-          
-          // レスポンス内容のステータスもチェック（test_connectionなど）
-          let applicationLevelError = false;
-          let errorMessage = '';
-          
-          if (hasError) {
-            errorMessage = response.error.message;
-            applicationLevelError = true;
-          } else if (response.result && response.result.status === 'failed') {
-            errorMessage = response.result.testResult || 'Application level failure';
-            applicationLevelError = true;
-          }
-          
-          resolve({
-            success: !applicationLevelError,
-            response,
-            error: applicationLevelError ? errorMessage : undefined,
-            timedOut: false
-          });
-        } else {
-          resolve({
-            success: false,
-            error: `No output. Code: ${code}, Stderr: ${stderr}`,
-            timedOut: false
-          });
-        }
-      } catch (error) {
-        resolve({
-          success: false,
-          error: `JSON parse error: ${error}. Stdout: ${stdout}, Stderr: ${stderr}`,
-          timedOut: false
+        const headers: Record<string, string> = { 'content-type': 'application/json', 'accept': 'application/json, text/event-stream' };
+        if (activeSessionId) headers['mcp-session-id'] = activeSessionId;
+        const res = await fetch(url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(command),
+          signal: controller.signal
         });
+        const text = await res.text();
+        resolve({ ok: res.ok, responseText: text, status: res.status });
+      } catch (e: any) {
+        resolve({ ok: false, responseText: '', status: 0, error: String(e) });
       }
-    });
+    })
+  );
 
-    child.on('error', (error) => {
-      resolve({
-        success: false,
-        error: `Process error: ${error.message}`,
-        timedOut: false
-      });
-    });
+  try {
+    // 2) 通常POST
+    let { ok, responseText, status, error } = await doPost();
+    // 3) セッションエラーなら再初期化して一度だけリトライ
+    if (!ok && (responseText.includes('No valid session ID') || responseText.includes('No sessionId') || status === 400)) {
+      const init = await initializeSession(timeoutMs);
+      if (!init.success) {
+        return { success: false, error: init.error || responseText || 'Failed to re-initialize session', timedOut: false };
+      }
+      ({ ok, responseText, status, error } = await doPost());
+    }
 
-    child.stdin.write(JSON.stringify(command) + '\n');
-    child.stdin.end();
-  });
+    // FastMCPのHTTP StreamingはSSEで返る場合がある
+    // SSEの本文例: "event: message\n" + "data: {json}\n\n"
+    const parseSseFirstJson = (s: string): any | null => {
+      const lines = (s || '').split(/\r?\n/);
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('data:')) {
+          const payload = trimmed.slice(5).trim();
+          try {
+            return JSON.parse(payload);
+          } catch {
+            continue;
+          }
+        }
+        // 一部実装ではプレーンJSONのみ返す場合もある
+        if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+          try {
+            return JSON.parse(trimmed);
+          } catch {
+            // noop
+          }
+        }
+      }
+      return null;
+    };
+
+    if (!ok && !responseText) {
+      return { success: false, error: error || `HTTP ${status}`, timedOut: false };
+    }
+
+    const candidate = parseSseFirstJson(responseText);
+    if (!candidate) {
+      return { success: false, error: `HTTP error: Unexpected response format`, timedOut: false };
+    }
+
+    const response = candidate;
+    const hasError = response.error !== undefined;
+    let applicationLevelError = false;
+    let errorMessage = '';
+    if (hasError) {
+      errorMessage = response.error.message;
+      applicationLevelError = true;
+    } else if (response.result && response.result.status === 'failed') {
+      errorMessage = response.result.testResult || 'Application level failure';
+      applicationLevelError = true;
+    }
+    return { success: !applicationLevelError, response, error: applicationLevelError ? errorMessage : undefined, timedOut: false };
+  } catch (err: any) {
+    const timedOut = err?.name === 'AbortError';
+    return { success: false, error: timedOut ? 'Command timed out' : `HTTP error: ${String(err)}`, timedOut };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function main() {
