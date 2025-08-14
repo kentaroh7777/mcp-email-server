@@ -271,9 +271,7 @@ async function runHealthCheck(): Promise<{
         method: 'tools/call',
         params: { name: 'get_account_stats', arguments: {} }
       }
-    },
-    // search_all_emailsは別途 test-search-all.sh でテスト
-    // プロセス管理の制約によりmonitor-health.tsからは除外
+    }
   );
 
   // 各アカウントに対する軽量テスト（全アカウント）
@@ -345,6 +343,58 @@ async function runHealthCheck(): Promise<{
         timedOut: false
       });
     }
+  }
+
+  // 4. Gmailトークン健全性チェック（横断検索を最小件数で叩いてinvalid_grantを検出）
+  try {
+    console.log(`\n🔄 gmail_token_check (search_all_emails, GMAIL_ONLY, limit=1) をテスト中...`);
+    const gmailCheckCmd = {
+      jsonrpc: '2.0',
+      id: 999,
+      method: 'tools/call',
+      params: {
+        name: 'search_all_emails',
+        arguments: { accounts: 'GMAIL_ONLY', limit: 1 }
+      }
+    };
+    const check = await runMCPCommand(gmailCheckCmd, 15000);
+    let hasInvalidGrant = false;
+    if (check.success && check.response?.result) {
+      // FastMCPのSSEラップ対応
+      const res = check.response.result;
+      let parsed: any = null;
+      if (Array.isArray(res.content) && res.content[0]?.text) {
+        try { parsed = JSON.parse(res.content[0].text); } catch {}
+      }
+      if (!parsed && typeof (res as any).emails !== 'undefined') {
+        parsed = res;
+      }
+      if (parsed && Array.isArray(parsed.errors) && parsed.errors.length > 0) {
+        const lowerErrors = parsed.errors.map((e: string) => String(e).toLowerCase());
+        hasInvalidGrant = lowerErrors.some((e: string) => e.includes('invalid_grant') || e.includes('authentication failed'));
+      }
+    }
+    const ok = check.success && !hasInvalidGrant;
+    const status = ok ? '✅' : '❌';
+    console.log(`  ${status} ${ok ? '成功' : 'Gmailトークン失効を検出'}`);
+    results.push({ test: 'gmail_token_check', success: ok, timedOut: false });
+    if (!ok) {
+      const failMsg = 'One or more Gmail accounts require re-auth (invalid_grant)';
+      errors.push(`gmail_token_check: ${failMsg}`);
+      failures.push({
+        testName: 'gmail_token_check',
+        analysis: {
+          reason: 'Gmailリフレッシュトークンが期限切れまたは無効です',
+          solution: '対象Gmailアカウントで再認可を実施してください',
+          command: 'npx tsx scripts/gmail-desktop-auth.mjs <account_name>'
+        }
+      });
+    }
+  } catch (e) {
+    console.log(`  ❌ gmail_token_check 実行エラー: ${e}`);
+    errors.push(`gmail_token_check: ${String(e)}`);
+    failures.push({ testName: 'gmail_token_check', analysis: analyzeFailure('gmail_token_check', String(e)) });
+    results.push({ test: 'gmail_token_check', success: false, timedOut: false });
   }
 
   return {
@@ -440,16 +490,16 @@ async function runMCPCommand(command: any, timeoutMs: number = 10000): Promise<{
     }
 
     const response = candidate;
-    const hasError = response.error !== undefined;
-    let applicationLevelError = false;
-    let errorMessage = '';
-    if (hasError) {
-      errorMessage = response.error.message;
-      applicationLevelError = true;
-    } else if (response.result && response.result.status === 'failed') {
-      errorMessage = response.result.testResult || 'Application level failure';
-      applicationLevelError = true;
-    }
+          const hasError = response.error !== undefined;
+          let applicationLevelError = false;
+          let errorMessage = '';
+          if (hasError) {
+            errorMessage = response.error.message;
+            applicationLevelError = true;
+          } else if (response.result && response.result.status === 'failed') {
+            errorMessage = response.result.testResult || 'Application level failure';
+            applicationLevelError = true;
+          }
     return { success: !applicationLevelError, response, error: applicationLevelError ? errorMessage : undefined, timedOut: false };
   } catch (err: any) {
     const timedOut = err?.name === 'AbortError';

@@ -104,6 +104,8 @@ export interface EmailMessage {
   id: string;
   accountName: string;
   accountType: 'gmail' | 'imap';
+  // メールが存在するフォルダ/ボックス名（IMAPで有効）。Gmailでは省略可。
+  folder?: string;
   subject: string;
   from: string;
   to: string[];

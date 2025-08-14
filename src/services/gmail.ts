@@ -285,36 +285,71 @@ export class GmailHandler {
     }
   }
 
-  async searchEmails(accountName: string, query: string, limit: number = 20): Promise<EmailMessage[]> {
+  async searchEmails(accountName: string, args: any): Promise<EmailMessage[]> {
     try {
       const gmail = await this.authenticate(accountName);
-      
-      const response = await gmail.users.messages.list({
-        userId: 'me',
-        q: query,
-        maxResults: Math.min(limit, 100)
-      });
+      const text: string | undefined = typeof args?.text === 'string' ? args.text : (typeof args?.query === 'string' ? args.query : undefined);
+      const sinceArg: string | undefined = typeof args?.since === 'string' ? args.since : undefined;
+      const beforeArg: string | undefined = typeof args?.before === 'string' ? args.before : undefined;
+      const limit: number = Math.max(1, Math.min(parseInt(args?.limit ?? '20', 10) || 20, 100));
+      const matchFields: string[] = Array.isArray(args?.matchFields) && args.matchFields.length ? args.matchFields : ['subject','from'];
+      const decodeMime: boolean = args?.decodeMime !== false;
 
-      if (!response.data.messages) {
-        return [];
+      const qParts: string[] = [];
+      qParts.push('in:anywhere');
+      if (sinceArg) {
+        const d = new Date(sinceArg + 'T00:00:00Z');
+        if (!isNaN(d.getTime())) {
+          const y = d.getUTCFullYear();
+          const m = String(d.getUTCMonth()+1).padStart(2, '0');
+          const da = String(d.getUTCDate()).padStart(2, '0');
+          qParts.push(`after:${y}/${m}/${da}`);
+        }
       }
+      if (beforeArg) {
+        const d = new Date(beforeArg + 'T00:00:00Z');
+        if (!isNaN(d.getTime())) {
+          const y = d.getUTCFullYear();
+          const m = String(d.getUTCMonth()+1).padStart(2, '0');
+          const da = String(d.getUTCDate()).padStart(2, '0');
+          qParts.push(`before:${y}/${m}/${da}`);
+        }
+      }
+      if (text && text.trim()) qParts.push(text.trim());
 
-      const emails: EmailMessage[] = [];
-      for (const message of response.data.messages) {
+      const q = qParts.join(' ');
+      const response = await gmail.users.messages.list({ userId: 'me', q, maxResults: limit });
+      if (!response.data.messages) return [];
+
+      const decodeMimeWord = (str?: string): string => {
+        if (!str) return '';
         try {
-          const messageDetail = await gmail.users.messages.get({
-            userId: 'me',
-            id: message.id!,
-            format: 'metadata',
-            metadataHeaders: ['From', 'Subject', 'Date']
+          return str.replace(/=\?([^?]+)\?([BQbq])\?([^?]+)\?=/g, (_m, cs, enc, data) => {
+            const charset = String(cs).toLowerCase();
+            const encoding = String(enc).toUpperCase();
+            if (encoding === 'B') {
+              const buf = Buffer.from(data.replace(/\s+/g, ''), 'base64');
+              if (charset.includes('utf-8')) return buf.toString('utf8');
+              return buf.toString();
+            } else {
+              const txt = data.replace(/_/g, ' ').replace(/=([0-9A-Fa-f]{2})/g, (_s: string, h: string) => String.fromCharCode(parseInt(h, 16)));
+              return txt;
+            }
           });
+        } catch {
+          return str;
+        }
+      };
 
+      const messages: EmailMessage[] = [];
+      for (const message of response.data.messages.slice(0, limit)) {
+        try {
+          const messageDetail = await gmail.users.messages.get({ userId: 'me', id: message.id!, format: 'metadata', metadataHeaders: ['From','Subject','Date'] });
           const headers = messageDetail.data.payload?.headers || [];
           const fromHeader = headers.find(h => h.name === 'From');
           const subjectHeader = headers.find(h => h.name === 'Subject');
           const dateHeader = headers.find(h => h.name === 'Date');
-
-          emails.push({
+          const m: EmailMessage = {
             id: message.id!,
             accountName,
             accountType: 'gmail',
@@ -325,13 +360,24 @@ export class GmailHandler {
             snippet: messageDetail.data.snippet || '',
             isUnread: messageDetail.data.labelIds?.includes('UNREAD') || false,
             hasAttachments: false
-          });
-        } catch (detailError) {
-          // Skip error messages silently
-        }
+          };
+          messages.push(m);
+        } catch {}
       }
 
-      return emails;
+      const needle = (text || '').toLowerCase();
+      const filtered = !needle ? messages : messages.filter(m => {
+        const subj = (decodeMime ? decodeMimeWord(m.subject) : m.subject).toLowerCase();
+        const from = (decodeMime ? decodeMimeWord(m.from) : m.from).toLowerCase();
+        const body = (decodeMime ? decodeMimeWord(m.snippet) : m.snippet).toLowerCase();
+        const checks: boolean[] = [];
+        if (matchFields.includes('subject')) checks.push(subj.includes(needle));
+        if (matchFields.includes('from')) checks.push(from.includes(needle));
+        if (matchFields.includes('body')) checks.push(body.includes(needle));
+        return checks.some(Boolean);
+      });
+
+      return filtered;
     } catch (error) {
       throw error;
     }

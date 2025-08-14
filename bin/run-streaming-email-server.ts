@@ -55,7 +55,16 @@ server.addTool({
   description: "Search emails in a specified account. Automatically detects account type (Gmail/IMAP).",
   parameters: z.object({
     account_name: z.string().describe("Name of the email account"),
-    query: z.string().describe("Search query (searches subject, from, and body)"),
+    // Backward-compatible: if 'query' is provided it will be treated as 'text'
+    query: z.string().optional().describe("Deprecated. Use text/since/before. If provided, treated as text."),
+    text: z.string().optional().describe("Free text to match (subject/from/body; server + local filter)"),
+    since: z.string().optional().describe("Start date (YYYY-MM-DD)"),
+    before: z.string().optional().describe("End date (YYYY-MM-DD, exclusive)"),
+    folders: z.array(z.string()).optional().describe("Folders to search (IMAP). Defaults include archives."),
+    matchFields: z.array(z.enum(["subject","from","body"]))
+      .optional()
+      .describe("Fields to match text against (default: subject,from)"),
+    decodeMime: z.boolean().optional().describe("Decode MIME-encoded headers before matching (default: true)"),
     limit: z.number().optional().default(20).describe("Maximum number of emails to return")
   }),
   execute: async (args) => {
@@ -288,7 +297,16 @@ server.addTool({
   name: "search_all_emails",
   description: "Search emails across all Gmail and IMAP accounts.",
   parameters: z.object({
-    query: z.string().describe("Search query (e.g., 'from:sender@example.com subject:report')"),
+    // Backward-compatible: if 'query' is provided it will be treated as 'text'
+    query: z.string().optional().describe("Deprecated. Use text/since/before. If provided, treated as text."),
+    text: z.string().optional().describe("Free text to match (subject/from/body; server + local filter)"),
+    since: z.string().optional().describe("Start date (YYYY-MM-DD)"),
+    before: z.string().optional().describe("End date (YYYY-MM-DD, exclusive)"),
+    folders: z.array(z.string()).optional().describe("Folders to search (IMAP). Defaults include archives."),
+    matchFields: z.array(z.enum(["subject","from","body"]))
+      .optional()
+      .describe("Fields to match text against (default: subject,from)"),
+    decodeMime: z.boolean().optional().describe("Decode MIME-encoded headers before matching (default: true)"),
     accounts: z.enum(["ALL", "GMAIL_ONLY", "IMAP_ONLY"]).optional().default("ALL").describe("Which accounts to search"),
     limit: z.number().optional().default(20).describe("Maximum number of results to return"),
     sortBy: z.enum(["date", "relevance"]).optional().default("date").describe("Sort results by date or relevance")

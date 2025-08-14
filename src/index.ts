@@ -107,10 +107,17 @@ export default class McpEmailServer {
           type: 'object',
           properties: {
             account_name: { type: 'string', description: 'Name of the email account' },
-            query: { type: 'string', description: 'Search query (searches subject, from, and body)' },
+            // backward-compatible: query maps to text if provided
+            query: { type: 'string', description: 'Deprecated. Use text/since/before. If provided, treated as text.' },
+            text: { type: 'string', description: 'Free text to match (subject/from/body; server + local filter)' },
+            since: { type: 'string', description: 'Start date (YYYY-MM-DD)' },
+            before: { type: 'string', description: 'End date (YYYY-MM-DD, exclusive)' },
+            folders: { type: 'array', items: { type: 'string' }, description: 'Folders to search (e.g. INBOX, INBOX.Archive). Defaults include archives.' },
+            matchFields: { type: 'array', items: { type: 'string', enum: ['subject','from','body'] }, description: 'Fields to match text against (default: subject,from)' },
+            decodeMime: { type: 'boolean', description: 'Decode MIME-encoded headers before matching (default: true)' },
             limit: { type: 'number', description: 'Maximum number of emails to return (default: 20)' }
           },
-          required: ['account_name', 'query']
+          required: ['account_name']
         }
       },
       {
@@ -222,7 +229,14 @@ export default class McpEmailServer {
         inputSchema: {
           type: 'object',
           properties: {
-            query: { type: 'string', description: 'Search query (e.g., "from:sender@example.com subject:report")' },
+            // backward-compatible: query maps to text if provided
+            query: { type: 'string', description: 'Deprecated. Use text/since/before. If provided, treated as text.' },
+            text: { type: 'string', description: 'Free text to match (subject/from/body; server + local filter)' },
+            since: { type: 'string', description: 'Start date (YYYY-MM-DD)' },
+            before: { type: 'string', description: 'End date (YYYY-MM-DD, exclusive)' },
+            folders: { type: 'array', items: { type: 'string' }, description: 'Folders to search (IMAP only). When omitted, common archives are auto-included.' },
+            matchFields: { type: 'array', items: { type: 'string', enum: ['subject','from','body'] }, description: 'Fields to match text against (default: subject,from)' },
+            decodeMime: { type: 'boolean', description: 'Decode MIME-encoded headers before matching (default: true)' },
             accounts: {
               type: 'string',
               enum: ['ALL', 'GMAIL_ONLY', 'IMAP_ONLY'],
@@ -237,7 +251,7 @@ export default class McpEmailServer {
               default: 'date'
             }
           },
-          required: ['query']
+          required: []
         }
       }
     ];
@@ -282,12 +296,16 @@ export default class McpEmailServer {
           }
           break;
         case 'search_emails':
+          // normalize args: map legacy query -> text
+          if (typeof args.query === 'string' && !args.text) {
+            args.text = args.query;
+          }
           if (account.type === 'gmail') {
             const handler = await this.connectionManager.getGmailHandler(accountName!);
-            return await handler.searchEmails(accountName!, args.query, args.limit);
+            return await (handler as any).searchEmails(accountName!, args);
           } else if (account.type === 'imap') {
             const handler = await this.connectionManager.getImapHandler(accountName!);
-            return await handler.searchEmails(accountName!, args.query, args.limit);
+            return await (handler as any).searchEmails(accountName!, args);
           }
           break;
         case 'get_email_detail':
@@ -389,7 +407,11 @@ export default class McpEmailServer {
         try {
           // 重複削除：ConnectionManager経由でハンドラー取得
           const handler = await this.connectionManager.getGmailHandler(account.name);
-          const emailPromise = handler.searchEmails(account.name, args.query, args.limit);
+          const normalizedArgs = { ...args };
+          if (typeof normalizedArgs.query === 'string' && !normalizedArgs.text) {
+            normalizedArgs.text = normalizedArgs.query;
+          }
+          const emailPromise = (handler as any).searchEmails(account.name, normalizedArgs);
           const timeoutPromise = new Promise((_, reject) => 
             setTimeout(() => reject(new Error('Individual Gmail search timeout')), 15000)
           );
@@ -418,7 +440,11 @@ export default class McpEmailServer {
         try {
           // 重複削除：ConnectionManager経由でハンドラー取得
           const handler = await this.connectionManager.getImapHandler(account.name);
-          const emailPromise = handler.searchEmails(account.name, args.query, args.limit);
+          const normalizedArgs = { ...args };
+          if (typeof normalizedArgs.query === 'string' && !normalizedArgs.text) {
+            normalizedArgs.text = normalizedArgs.query;
+          }
+          const emailPromise = (handler as any).searchEmails(account.name, normalizedArgs);
           const timeoutPromise = new Promise((_, reject) => 
             setTimeout(() => reject(new Error('Individual ImapFlow search timeout')), 15000)
           );
@@ -442,9 +468,10 @@ export default class McpEmailServer {
 
     // Sort results
     const sortedResults = results.sort((a, b) => {
-      if (args.sortBy === 'relevance') {
-        const aScore = a.subject.toLowerCase().includes(args.query.toLowerCase()) ? 1 : 0;
-        const bScore = b.subject.toLowerCase().includes(args.query.toLowerCase()) ? 1 : 0;
+      if (args.sortBy === 'relevance' && (args.text || args.query)) {
+        const needle = String(args.text || args.query || '').toLowerCase();
+        const aScore = a.subject.toLowerCase().includes(needle) ? 1 : 0;
+        const bScore = b.subject.toLowerCase().includes(needle) ? 1 : 0;
         if (aScore !== bScore) return bScore - aScore;
       }
       return new Date(b.date).getTime() - new Date(a.date).getTime();
