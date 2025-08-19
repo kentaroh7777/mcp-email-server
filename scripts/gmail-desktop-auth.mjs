@@ -299,7 +299,7 @@ ${refreshTokenKey}=${tokens.refresh_token}
     for (const key in this.config) {
       const match = key.match(/^GMAIL_REFRESH_TOKEN_([a-z0-9_]+)$/);
       if (match && this.config[key]) {
-        const accountName = match[1].toUpperCase();
+        const accountName = match[1];
         const refreshToken = this.config[key];
         
         // トークンの有効性をチェック
@@ -419,16 +419,16 @@ ${refreshTokenKey}=${tokens.refresh_token}
             input: process.stdin,
             output: process.stdout
           });
-          rl2.question('新規アカウント名を入力 (英大文字、数字、アンダースコア): ', (customName) => {
+          rl2.question('新規アカウント名を入力 (英数字、アンダースコア): ', (customName) => {
             rl2.close();
-            if (/^[A-Z][A-Z0-9_]*$/.test(customName)) {
+            if (/^[a-zA-Z][a-zA-Z0-9_]*$/.test(customName)) {
               resolve(customName);
             } else {
-              console.error('❌ 無効なアカウント名です（英大文字で始まり、英大文字・数字・アンダースコアのみ使用可）');
+              console.error('❌ 無効なアカウント名です（英字で始まり、英数字・アンダースコアのみ使用可）');
               resolve(null);
             }
           });
-        } else if (/^[A-Z][A-Z0-9_]*$/.test(answer)) {
+        } else if (/^[a-zA-Z][a-zA-Z0-9_]*$/.test(answer)) {
           // 直接アカウント名を入力
           resolve(answer);
         } else {
@@ -516,8 +516,8 @@ function showUsage() {
      GMAIL_REDIRECT_URI=urn:ietf:wg:oauth:2.0:oob
      
      # 認証後、各アカウントのトークンが自動追加される:
-     GMAIL_REFRESH_TOKEN_main=xxx  # MAINアカウント
-     GMAIL_REFRESH_TOKEN_work=xxx  # WORKアカウント
+     GMAIL_REFRESH_TOKEN_account1=xxx  # アカウント1
+     GMAIL_REFRESH_TOKEN_account2=xxx  # アカウント2
 
 2. 実行:
    node scripts/gmail-desktop-auth.mjs [ACCOUNT_NAME]
@@ -526,8 +526,8 @@ function showUsage() {
    node scripts/gmail-desktop-auth.mjs
    
    # アカウント名を指定する場合:
-   node scripts/gmail-desktop-auth.mjs MAIN    # メインアカウント
-   node scripts/gmail-desktop-auth.mjs WORK    # 仕事用アカウント
+   node scripts/gmail-desktop-auth.mjs account1    # アカウント1
+   node scripts/gmail-desktop-auth.mjs account2    # アカウント2
 
 3. 認証フロー:
    - ブラウザが開いて Google の認証ページが表示される
@@ -581,8 +581,8 @@ async function main() {
     console.log(`\n📧 選択されたアカウント: ${accountName}`);
   } else {
     // 引数でアカウント名が指定された場合の検証
-    if (!/^[A-Z][A-Z0-9_]*$/.test(accountName)) {
-      console.error('❌ アカウント名は英大文字とアンダースコアのみ使用可能です (例: MAIN, WORK)');
+    if (!/^[a-zA-Z][a-zA-Z0-9_]*$/.test(accountName)) {
+      console.error('❌ アカウント名は英数字とアンダースコアのみ使用可能です (例: main, work)');
       process.exit(1);
     }
     
