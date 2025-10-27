@@ -499,6 +499,15 @@ ${refreshTokenKey}=${tokens.refresh_token}
     console.log('\n🎉 Gmail認証セットアップが完了しました！');
     console.log('これで MCP Email Server から Gmail にアクセス可能です。');
     
+    console.log('\n🔄 重要: サーバーの再起動が必要です');
+    console.log('認証トークンの更新を有効にするため、MCPサーバーを再起動してください:');
+    console.log('  📋 推奨コマンド: ./scripts/server.sh restart');
+    console.log('  📋 または手動で:');
+    console.log('    launchctl unload ~/Library/LaunchAgents/com.user.mcp-email-server.plist');
+    console.log('    launchctl load ~/Library/LaunchAgents/com.user.mcp-email-server.plist');
+    console.log('\n✅ 再起動後、動作確認を実行してください:');
+    console.log('  📋 npm run health:check');
+    
     return true;
   }
 }

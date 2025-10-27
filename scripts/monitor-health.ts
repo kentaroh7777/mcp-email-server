@@ -518,6 +518,12 @@ async function main() {
   
   console.log(`\n📊 Overall Status: ${health.success ? '✅ HEALTHY' : '❌ UNHEALTHY'}`);
   console.log(`Tests Passed: ${health.results.filter(r => r.success).length}/${health.results.length}`);
+  // トークン認証サマリ（gmail_token_check）
+  const gmailTokenSummary = health.results.find(r => r.test === 'gmail_token_check');
+  if (gmailTokenSummary) {
+    const tokenStatus = gmailTokenSummary.success ? '✅' : (gmailTokenSummary.timedOut ? '⏰' : '❌');
+    console.log(`🔐 Token/Auth: ${tokenStatus}`);
+  }
   
   if (health.errors.length > 0) {
     console.log('\n🚨 エラー詳細:');
@@ -526,10 +532,24 @@ async function main() {
     if (health.failures.length > 0) {
       console.log('\n🔧 推奨対処法:');
       
+      // 特殊ケース: 全アカウントOKだがgmail_token_checkのみ失敗 = サーバー再起動が必要
+      const accountTestResults = health.results.filter(r => r.test.includes('(') || r.test.includes('test_connection') || r.test.includes('list_emails'));
+      const allAccountsOk = accountTestResults.every(r => r.success);
+      const gmailTokenCheckFailed = health.failures.some(f => f.testName === 'gmail_token_check');
+      
+      if (allAccountsOk && gmailTokenCheckFailed) {
+        console.log('\n  🔄 サーバー再起動が必要:');
+        console.log('    • 全アカウントの接続は正常ですが、Gmail横断検索でエラーが発生しています');
+        console.log('    • これは通常、認証トークン更新後にサーバーの再起動が必要な状況です');
+        console.log('    💡 対処法: MCP Email Serverを再起動してください');
+        console.log('    📋 コマンド: ./scripts/server.sh restart');
+        console.log('    📋 または手動で: launchctl unload ~/Library/LaunchAgents/com.user.mcp-email-server.plist && launchctl load ~/Library/LaunchAgents/com.user.mcp-email-server.plist');
+      }
+      
       // Gmailアカウントの問題をグループ化
       const gmailFailures = health.failures.filter(f => f.testName.includes('(') && !f.testName.includes('_h_fpo_com'));
       const imapFailures = health.failures.filter(f => f.testName.includes('_h_fpo_com'));
-      const otherFailures = health.failures.filter(f => !f.testName.includes('(') && !f.testName.includes('_h_fpo_com'));
+      const otherFailures = health.failures.filter(f => !f.testName.includes('(') && !f.testName.includes('_h_fpo_com') && f.testName !== 'gmail_token_check');
       
       if (gmailFailures.length > 0) {
         console.log('\n  📧 Gmail アカウント:');
@@ -544,6 +564,8 @@ async function main() {
             }
           }
         });
+        console.log('\n    ⚠️  Gmail認証完了後は必ずサーバーを再起動してください:');
+        console.log('      📋 ./scripts/server.sh restart');
       }
       
       if (imapFailures.length > 0) {
@@ -567,6 +589,17 @@ async function main() {
           }
         });
       }
+      
+      // Gmail認証が必要な場合の追加ガイダンス
+      const hasGmailAuthError = health.failures.some(f => 
+        f.analysis.command && f.analysis.command.includes('gmail-desktop-auth.mjs')
+      );
+      if (hasGmailAuthError) {
+        console.log('\n  📘 Gmail認証手順:');
+        console.log('    1. Gmail認証を実行: npx tsx scripts/gmail-desktop-auth.mjs');
+        console.log('    2. 認証完了後、必ずサーバーを再起動: ./scripts/server.sh restart');
+        console.log('    3. 再度ヘルスチェックを実行: npm run health:check');
+      }
     }
   }
 
@@ -581,6 +614,13 @@ async function main() {
       console.log(`  ${status} ${result.test}`);
     }
   });
+  // トークン検査
+  const gmailTokenResult = health.results.find(r => r.test === 'gmail_token_check');
+  if (gmailTokenResult) {
+    const status = gmailTokenResult.success ? '✅' : (gmailTokenResult.timedOut ? '⏰' : '❌');
+    console.log('\n🔐 トークン検査:');
+    console.log(`  ${status} gmail_token_check`);
+  }
   
   // search_all_emailsは別途テスト
   console.log('\n💡 search_all_emails は別途テスト:');

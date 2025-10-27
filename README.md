@@ -42,10 +42,18 @@ Gmail と IMAP アカウントの両方をサポートする、統合メール�
 
 | スクリプト | 目的 | 使用方法 |
 |-----------|------|----------|
-| `gmail-desktop-auth.mjs` | Gmail OAuth2認証セットアップ | `node scripts/gmail-desktop-auth.mjs [ACCOUNT_NAME]` |
-| `cleanup-env-tokens.mjs` | 環境変数のクリーンアップと標準化 | `node scripts/cleanup-env-tokens.mjs` |
-| `setup-xserver.mjs` | XServer用対話式IMAPアカウントセットアップ | `node scripts/setup-xserver.mjs` |
+| `gmail-desktop-auth.mjs` | Gmail OAuth2認証セットアップ | `npx tsx scripts/gmail-desktop-auth.mjs [ACCOUNT_NAME]` |
+| `cleanup-env-tokens.mjs` | 環境変数のクリーンアップと標準化 | `npx tsx scripts/cleanup-env-tokens.mjs` |
+| `setup-xserver.mjs` | XServer用対話式IMAPアカウントセットアップ | `npx tsx scripts/setup-xserver.mjs` |
 | `encrypt-password.ts` | IMAPアカウント用パスワード暗号化 | `npx tsx scripts/encrypt-password.ts [PASSWORD]` |
+
+### 🖥️ サーバー管理
+
+| スクリプト | 目的 | 使用方法 |
+|-----------|------|----------|
+| `server.sh` | MCP Email Server管理（起動/停止/再起動/状態確認） | `./scripts/server.sh {start\|stop\|restart\|status\|logs\|health}` |
+| `monitor-health.ts` | 包括的ヘルスチェック（認証状態診断付き） | `npm run health:check` |
+| `test-search-all.sh` | 横断検索機能テスト | `./scripts/test-search-all.sh` |
 
 
 ## ⚙️ インストールとセットアップ
@@ -97,6 +105,9 @@ IMAP_TLS_accountname=true
 ```bash
 # 最初に.envファイルにGmail OAuth2認証情報を設定し、その後：
 node scripts/gmail-desktop-auth.mjs ACCOUNT_NAME
+
+# 認証完了後、サーバーを再起動して設定を反映：
+./scripts/server.sh restart
 ```
 
 #### IMAPアカウント
@@ -108,14 +119,19 @@ node scripts/setup-xserver.mjs
 npx tsx scripts/encrypt-password.ts "あなたのパスワード"
 ```
 
-### 5. 確認
+### 5. サーバー起動と確認
 
 ```bash
-# 高速接続テスト
-npx tsx scripts/quick-test.ts
+# サーバー起動（LaunchAgent使用）
+./scripts/server.sh start
 
-# 包括的ヘルスチェック
-npx tsx scripts/monitor-health.ts
+# サーバー状態確認
+./scripts/server.sh status
+
+# 包括的ヘルスチェック（推奨）
+./scripts/server.sh health
+# または
+npm run health:check
 
 # 完全テストスイート
 npm test
@@ -335,39 +351,68 @@ CLIとMCP環境の両方で全ツールのテストと検証が完了：
 
 ## 🔧 トラブルシューティング
 
-### 一般的な問題
+詳細なトラブルシューティングについては **[doc/re-auth.md](doc/re-auth.md)** を参照してください。
 
-#### Gmail認証
+### 一般的な問題と解決フロー
+
+#### 1. 認証エラーの診断・解決
 ```bash
-# Gmailアカウントの再認証
+# 1. ヘルスチェック実行
+npm run health:check
+
+# 2. エラーパターンに応じて対処
+# パターンA: Gmail認証エラー
 node scripts/gmail-desktop-auth.mjs ACCOUNT_NAME
+./scripts/server.sh restart
 
-# 古いトークン形式のクリーンアップ
-node scripts/cleanup-env-tokens.mjs
-```
+# パターンB: サーバー再起動のみ必要
+./scripts/server.sh restart
 
-#### IMAP接続問題
-```bash
-# パスワード復号化テスト
+# パターンC: IMAP認証エラー
 npx tsx scripts/decrypt-test.ts
-
-# 正しいキーでパスワードを再暗号化
-npx tsx scripts/encrypt-password.ts "あなたのパスワード"
 ```
 
-#### MCP接続問題
-- MCP設定の`cwd`パスを確認
-- .envとMCP設定で`EMAIL_ENCRYPTION_KEY`が一致していることを確認
-- TypeScript実行をチェック: `npx tsx --version`
+#### 2. サーバー管理
+```bash
+# サーバー状態確認
+./scripts/server.sh status
+
+# サーバー再起動（認証後は必須）
+./scripts/server.sh restart
+
+# ログ確認
+./scripts/server.sh logs
+./scripts/server.sh logs error
+```
+
+#### 3. 詳細診断
+```bash
+# 横断検索テスト
+./scripts/test-search-all.sh
+
+# 個別アカウントテスト
+curl -X POST http://localhost:3456/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"method":"tools/call","params":{"name":"test_connection","arguments":{"account_name":"ACCOUNT_NAME"}}}'
+```
+
+### 予防保守
+```bash
+# 定期ヘルスチェック（推奨: 毎日）
+./scripts/server.sh health
+
+# 定期再起動（推奨: 週1回）
+./scripts/server.sh restart
+```
 
 ### デバッグモード
 
 ```bash
-# デバッグログを有効化
-DEBUG=1 npx tsx src/index.ts
+# 詳細ログでサーバー起動
+DEBUG=1 npx tsx bin/run-streaming-email-server.ts
 
-# 詳細出力で実行
-NODE_ENV=development npx tsx src/index.ts
+# 開発モードで実行
+NODE_ENV=development npx tsx bin/run-streaming-email-server.ts
 ```
 
 ## 📈 将来の機能拡張
@@ -393,7 +438,16 @@ MITライセンス - 詳細はLICENSEファイルを参照。
 ## 🆘 サポート
 
 問題や質問について：
-1. 上記のトラブルシューティングセクションを確認
-2. `DEBUG=1`を有効にしてログをレビュー
-3. ヘルスチェックスクリプトでテスト
-4. 詳細なエラー情報と設定詳細を含めてissueを作成
+
+1. **[doc/re-auth.md](doc/re-auth.md)** のAI向けワークフローを確認
+2. ヘルスチェックで問題を診断: `./scripts/server.sh health`  
+3. サーバー管理ツールを活用: `./scripts/server.sh --help`
+4. デバッグログを確認: `./scripts/server.sh logs`
+5. 詳細なエラー情報と設定詳細を含めてissueを作成
+
+### 🤖 AI支援
+
+このプロジェクトには AI（Claude、ChatGPT等）向けの診断・解決ワークフローが含まれています：
+- **自動診断**: `npm run health:check` による問題の自動分類
+- **段階的解決**: パターン別の具体的な対処手順
+- **予防保守**: 定期的なメンテナンス推奨事項
